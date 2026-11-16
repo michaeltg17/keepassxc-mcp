@@ -14,6 +14,11 @@ $ErrorActionPreference = 'Stop'
 $repo = 'michaeltg17/keepassxc-mcp'
 $dir = Join-Path $env:LOCALAPPDATA 'Programs\keepassxc-mcp'
 
+if (Get-Process -Name 'keepassxc-mcp' -ErrorAction SilentlyContinue) {
+    Write-Error 'keepassxc-mcp is running (an MCP host holds the exe). Close your agent/OpenCode first, then re-run this installer.'
+    exit 1
+}
+
 $rid = switch (${env:PROCESSOR_ARCHITECTURE}) {
     'AMD64' { 'win-x64' }
     'ARM64' { 'win-arm64' }

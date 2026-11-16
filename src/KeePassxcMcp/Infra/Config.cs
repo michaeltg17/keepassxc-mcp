@@ -10,10 +10,16 @@ public sealed record VaultConfig(
     string? MainKeyfilePath,
     string StagingVaultPath,
     string StagingPassword,
-    string KeepassxcCliPath)
+    string KeepassxcCliPath,
+    bool? AllowAgentApproverWindow = null)
 {
     /// <summary>Main vault may be password-only (null keyfile) or password+keyfile.</summary>
     public bool MainHasKeyfile => !string.IsNullOrWhiteSpace(MainKeyfilePath);
+
+    /// <summary>Whether the agent may pop the approver window (vault_open_approver /
+    /// promote-window). Default true; set "allowAgentApproverWindow": false in config to
+    /// restore strict human-launches-everything mode.</summary>
+    public bool AllowApproverWindow => AllowAgentApproverWindow ?? true;
 
     /// <summary>Secrets this config holds, for the redaction filter. The main vault
     /// password is deliberately NOT part of this record — it never exists in config.</summary>

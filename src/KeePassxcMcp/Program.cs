@@ -15,6 +15,8 @@ switch ((args.Length == 0 ? "mcp" : args[0]).ToLowerInvariant())
         return await RunMcpAsync();
     case "promote":
         return await RunPromoteAsync();
+    case "promote-window":
+        return RunPromoteWindow();
     case "status":
         return RunStatus();
     case "help" or "-h" or "--help":
@@ -92,6 +94,19 @@ static async Task<int> RunPromoteAsync()
     return await Promoter.RunAsync(cfg, paths, new KeePassCli(cfg.KeepassxcCliPath));
 }
 
+static int RunPromoteWindow()
+{
+    var result = ApproverLauncher.TryOpenPromoteWindow();
+    if (result.Launched)
+    {
+        Console.WriteLine($"Approver window opened: {result.Detail}");
+        Console.WriteLine("Review the manifest, confirm y, and type the master password in that window.");
+        return 0;
+    }
+    Console.Error.WriteLine("Could not open an approver window: " + result.Detail);
+    return 1;
+}
+
 static int RunStatus()
 {
     VaultConfig cfg;
@@ -140,6 +155,9 @@ static int RunStatus()
     Console.WriteLine(state.LastPromotedUtc is { } lp
         ? $"last promote    : {lp:O} ({state.LastPromotedEntryCount} entries)"
         : "last promote    : never");
+    Console.WriteLine($"approver window : {(cfg.AllowApproverWindow
+        ? "agent-openable (vault_open_approver / promote-window; disable with \"allowAgentApproverWindow\": false)"
+        : "human-only (allowAgentApproverWindow: false)")}");
 
     Console.WriteLine("main vault password: never in config, never on disk, never in this process — only the interactive `promote` mode reads it from you.");
     return 0;
@@ -152,10 +170,12 @@ static void PrintUsage()
 
         usage:
           keepassxc-mcp                stdio MCP server for the agent (tools: vault_stage_entry,
-                                       vault_list_staged, vault_promote). NEVER touches the main vault
-                                       password.
+                                       vault_list_staged, vault_promote, vault_open_approver).
+                                       NEVER touches the main vault password.
           keepassxc-mcp promote        HUMAN approver: review the staged request + live merge dry-run,
                                        confirm, type the master password. Run this in a real terminal.
+          keepassxc-mcp promote-window opens `promote` in a new visible terminal window (the launcher
+                                       passes no data; a human still types y + the password there).
           keepassxc-mcp status         show config (password redacted), staging contents, pending request.
 
         config: %APPDATA%\keepassxc-mcp\config.json on Windows, ~/.config/keepassxc-mcp/config.json on

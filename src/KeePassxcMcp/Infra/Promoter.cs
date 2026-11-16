@@ -16,6 +16,17 @@ public static class Promoter
     public static async Task<int> RunAsync(VaultConfig cfg, ConfigPaths paths, KeePassCli cli, CancellationToken ct = default)
     {
         Console.Error.WriteLine("keepassxc-mcp promote — human approval for staged vault changes");
+        // Identity banner: whoever opened this window (human or vault_open_approver), the
+        // human can verify WHICH binary is about to prompt for the master password.
+        var self = Environment.ProcessPath ?? "";
+        Console.Error.WriteLine($"this executable : {self}");
+        if (self.Length > 0 && File.Exists(self))
+        {
+            var (selfSha, selfSize) = await Hashing.Sha256FileAsync(self, ct);
+            Console.Error.WriteLine($"  its sha256    : {selfSha} ({selfSize} B) — verify before typing any password");
+        }
+        Console.Error.WriteLine();
+        ApproverConsole.WaitEnter("Press Enter in this window to begin the review (nothing has been read or merged): ");
         Console.Error.WriteLine($"main vault : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (+ keyfile)" : " (password only)"));
         Console.Error.WriteLine($"staging    : {cfg.StagingVaultPath}");
 

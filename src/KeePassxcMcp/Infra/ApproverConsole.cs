@@ -15,6 +15,23 @@ public static class ApproverConsole
         return answer is not null && answer.Trim().Equals("y", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Interactive gate: nothing proceeds in a real terminal until the human
+    /// presses Enter there. Skipped when stdin is redirected (tests/automation only).</summary>
+    public static void WaitEnter(string prompt)
+    {
+        if (Console.IsInputRedirected) return;
+        Console.Error.Write(prompt);
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.Error.WriteLine();
+                return;
+            }
+        }
+    }
+
     public static string ReadPassword(string prompt)
     {
         Console.Error.Write(prompt);

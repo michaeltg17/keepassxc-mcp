@@ -9,7 +9,7 @@ from that.
 | Actor                        | Assumed capability                                             |
 | ---------------------------- | -------------------------------------------------------------- |
 | The AI agent (MCP client)    | Untrusted by design. Runs `keepassxc-mcp` (mcp mode) as your OS user. May stage, list, request. |
-| The human                    | Runs `keepassxc-mcp promote` in a real terminal. Knows the main vault password. |
+| The human                    | Runs `keepassxc-mcp promote` in a real terminal — possibly a window the agent opened *for them* (`vault_open_approver`) after they agreed in chat; they still type everything in it. Knows the main vault password. |
 | keepassxc-cli                | Trusted dependency (official KeePassXC binary) — all kdbx crypto and writes. |
 | Local malware / other apps   | Same-OS-user code can read anything the user can read (config, staging file, keylogger the password you type). Out of scope; nothing this tool does makes that worse. |
 
@@ -19,7 +19,8 @@ from that.
    agent can reach.** It is read interactively (masked `Console.ReadKey` loop) in
    `promote` mode only, and goes straight into keepassxc-cli's stdin. It is never
    returned from any function, never logged, and `finally`-cleared at the end of the
-   approval flow.
+   approval flow. The invariant is about who **types**, not who launches the window
+   (see "The approver window" below).
 2. **The MCP server process cannot merge.** It has no tool that unlocks the main vault;
    the merge diff is computed by the approver process at approval time (the agent cannot
    pre-seed or fake a diff).
@@ -40,11 +41,38 @@ from that.
    the GUI or a sync tool outside this flow), the approver is warned before anything is
    merged.
 
+## The approver window: who launches vs who types
+
+By default (`"allowAgentApproverWindow": true`, omitting the key = true) the agent may
+open the approver for the human via the `vault_open_approver` MCP tool (or the
+`keepassxc-mcp promote-window` CLI verb). What that does — and does not — do:
+
+- It launches *this same executable* in `promote` mode in a **new visible OS terminal
+  window** (cmd /k on Windows, Terminal.app via osascript on macOS, the first available
+  terminal emulator on Linux; headless systems get an honest "open a terminal yourself"
+  fallback). The launcher pipes **no** stdin, passes **no** secrets, and receives no
+  result back — a fresh, independent process tree with its own console input buffer.
+- The window prints an **identity banner** (own path + own sha256) and then waits for the
+  human to press **Enter in that window** before showing anything or prompting.
+- The tool refuses without a recorded pending request, refuses outright when
+  `allowAgentApproverWindow` is `false`, and its description obligates the agent to have
+  asked the user in chat first ("task is done — want me to open the approval prompt?").
+
+**What it weakens, honestly:** the human no longer exclusively initiates *when* a
+credential prompt can appear. A steered agent (prompt injection from content it read)
+could pop approval windows unprompted; the human must still type `y` and the password,
+and should verify the identity banner path matches the installed binary before typing.
+Set `"allowAgentApproverWindow": false` to restore strict human-launch mode — then the
+tool refuses and only manual `keepassxc-mcp promote` exists.
+
 ## What agents CAN do
 
 - Create/edit entries (title, notes) and import file attachments **into `staging.kdbx` only**.
 - List everything staged, with per-attachment name/size/sha256 from the staging database.
 - Write a `pending-request.json` describing staged intent.
+- Open the approver's terminal window (`vault_open_approver`, if enabled in config) — it
+  can open that window but can never complete it: `y` and the password are keyboard input
+  to another process's console.
 - Read config-adjacent non-secret files (`pending-request.json`, `state.json`) — they are
   agent-visible by design: the agent wrote them.
 
