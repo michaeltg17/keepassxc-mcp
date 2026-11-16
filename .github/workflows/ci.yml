@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      # Integration tests drive the real keepassxc-cli; the suite self-skips without it.
+      - name: Install KeePassXC (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y keepassxc
+
+      - name: Install KeePassXC (macOS)
+        if: runner.os == 'macOS'
+        run: brew install keepassxc
+
+      - name: Install KeePassXC (Windows)
+        if: runner.os == 'Windows'
+        run: choco install keepassxc -y --no-progress
+
+      # Windows installs to Program Files without putting keepassxc-cli on PATH.
+      - name: Point tests at keepassxc-cli (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "KEEPASSXC_CLI=C:\Program Files\KeePassXC\keepassxc-cli.exe" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: dotnet build -c Release
+
+      - name: Test
+        run: dotnet test -c Release --no-build

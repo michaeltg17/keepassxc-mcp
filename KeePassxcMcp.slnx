@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/KeePassxcMcp/KeePassxcMcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KeePassxcMcp.Tests/KeePassxcMcp.Tests.csproj" />
+  </Folder>
+</Solution>
