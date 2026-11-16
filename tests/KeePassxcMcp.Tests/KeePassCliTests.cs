@@ -51,7 +51,8 @@ public class KeePassCliTests
 
         var dry = await h.Cli.MergeAsync(h.MainPath, VaultHarness.MainPassword, null, h.StagingPath, VaultHarness.StagingPassword, dryRun: true);
         Assert.True(dry.Success, dry.FailureSummary);
-        Assert.Contains("Added:", dry.StdOut);
+        // keepassxc-cli wording varies by version ("Added: …" / "Creating missing …").
+        Assert.Matches("Added:|Creating missing", dry.StdOut);
         Assert.False(await h.MainHasEntryAsync("Inbox/ToMerge"), "dry-run must not modify the main vault");
     }
 

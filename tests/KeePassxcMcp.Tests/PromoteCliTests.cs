@@ -45,7 +45,7 @@ public class PromoteCliTests
 
         Assert.Equal(0, exit);
         // dry-run diff printed on stdout (the human's actual review surface):
-        Assert.Contains("Added:", stdout);
+        Assert.Matches("Added:|Creating missing", stdout);
         Assert.Contains("Contract", stderr + stdout);
         // merge happened, attachment present with matching hash:
         Assert.True(await h.MainHasEntryAsync("Inbox/Legal/Contract"));
@@ -74,7 +74,7 @@ public class PromoteCliTests
         var (exit, stdout, _) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
 
         Assert.Equal(0, exit);
-        Assert.Contains("Added:", stdout);
+        Assert.Matches("Added:|Creating missing", stdout);
         Assert.True(await h.MainHasEntryAsync("Inbox/WithKeyfile"));
         Assert.Empty(await h.StagedEntryPathsAsync());
     }

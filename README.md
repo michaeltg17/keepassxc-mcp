@@ -183,8 +183,9 @@ Full details in [SECURITY.md](SECURITY.md). The short version:
   `merge` prompt twice (password, repeat / main, staging) — stdin lines match that order.
 - A **keyfile+password** DB needs both in one invocation (`-k <path>` + stdin password);
   either alone fails. Keyfiles are config-supplied paths, never typed.
-- `merge --dry-run` prints the diff (`Added: …`) to stdout; `-q` silences it — so merge is
-  called *without* `-q` and the prompt echo is filtered.
+- `merge --dry-run` prints the diff to stdout (`Added: …` on 2.7.10+; older builds say
+  `Creating missing …` — the tests accept both); `-q` silences it — so merge is called
+  *without* `-q` and the prompt echo is filtered.
 - `attachment-import -f` overwrites; `show --show-attachments` lists
   `name (size)`; `attachment-export` round-trips byte-identical (verified by sha256).
 - `mkdir` walks one level at a time (no `-p`); `add` on an existing entry fails, so
