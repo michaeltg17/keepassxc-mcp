@@ -120,21 +120,6 @@ Use OpenCode's permissions to gate the tools (per `action` patterns matching
 `keepassxc_*`) if you want the client — not just the terminal — to confirm before the
 agent can stage or request promotion.
 
-**Claude Desktop** (`claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "keepassxc": {
-      "command": "/path/to/keepassxc-mcp",
-      "env": { "KEEPASSXC_MCP_CONFIG": "/path/to/config.json" }
-    }
-  }
-}
-```
-
-Claude Desktop shows a confirmation for every tool call; keep it on.
-
 ## Promoting staged changes
 
 ```
