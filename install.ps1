@@ -33,8 +33,8 @@ try {
     Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $tmp 'SHA256SUMS.txt')
 
     Write-Host 'Verifying checksum...'
-    $expected = (Get-Content (Join-Path $tmp 'SHA256SUMS.txt') |
-        Where-Object { $_ -match " $([regex]::Escape($asset))$" } -split '\s+')[0]
+    $expected = ((Get-Content (Join-Path $tmp 'SHA256SUMS.txt') |
+        Where-Object { $_ -match " $([regex]::Escape($asset))$" }) -split '\s+')[0]
     $actual = (Get-FileHash (Join-Path $tmp $asset) -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) {
         Write-Error "Checksum verification FAILED (expected $expected, got $actual). Nothing installed."
