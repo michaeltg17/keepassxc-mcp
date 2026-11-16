@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      # Self-contained single file so users need no .NET install. NOT trimmed: the
+      # ModelContextProtocol SDK relies on reflection (DI + tool discovery).
+      - name: Publish (${{ matrix.rid }})
+        run: |
+          dotnet publish src/KeePassxcMcp/KeePassxcMcp.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false \
+            -o out/${{ matrix.rid }}
+
+      - name: Archive (${{ matrix.rid }})
+        run: |
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-${{ matrix.rid }}.zip keepassxc-mcp.exe)
+          else
+            tar -czf keepassxc-mcp-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-${{ matrix.rid }}
+          path: keepassxc-mcp-*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: asset-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum keepassxc-mcp-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --notes-start-with "Self-contained builds (no .NET install needed). Requires the external **keepassxc-cli** (KeePassXC) — it does all kdbx work. Quick install: \`install.sh\` / \`install.ps1\` in the repo root."
