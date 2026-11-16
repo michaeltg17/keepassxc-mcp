@@ -70,8 +70,19 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cat > NOTES.md <<'EOF'
+          Self-contained single-file builds — no .NET install needed. Each archive contains one
+          binary. The external **keepassxc-cli** (KeePassXC ≥ 2.7.x) is still required: it does
+          all kdbx work, and this tool deliberately never bundles it.
+
+          Quick install (picks your platform's asset and verifies `SHA256SUMS.txt`):
+
+          - Linux/macOS: `curl -fsSL https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.sh | bash`
+          - Windows (PowerShell): `irm https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.ps1 | iex`
+
+          Docs: https://github.com/michaeltg17/keepassxc-mcp/wiki
+          EOF
           gh release create "${GITHUB_REF_NAME}" \
             dist/* \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --notes-start-with "Self-contained builds (no .NET install needed). Requires the external **keepassxc-cli** (KeePassXC) — it does all kdbx work. Quick install: \`install.sh\` / \`install.ps1\` in the repo root."
+            --notes-file NOTES.md
