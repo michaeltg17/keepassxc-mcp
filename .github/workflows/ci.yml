@@ -3,13 +3,22 @@ name: CI
 on:
   push:
     branches: [main, dev]
-  pull_request:
-    branches: [main]
+  # No pull_request trigger: the checks from dev pushes report against the PR
+  # head and satisfy the main ruleset's required checks. Correct only because
+  # strict_required_status_checks_policy is ON — GitHub blocks merging unless
+  # dev contains main's tip, which makes the merge commit's tree identical to
+  # the tested dev tree. Keep strict on, and PRs only from dev.
   # Weekly drift check on main even with zero commits: the suite asserts on the
   # runner's keepassxc-cli behavior, and runners auto-update KeePassXC.
   schedule:
     - cron: '23 6 * * 1'   # Mondays 06:23 UTC (off-peak minute)
   workflow_dispatch:
+
+# One run per ref: pushing a newer commit cancels the stale in-flight run
+# instead of queueing a second 3-OS matrix behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
