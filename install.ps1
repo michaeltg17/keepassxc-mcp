@@ -29,12 +29,19 @@ $latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
 $tag = $latest.tag_name
 if (-not $tag) { Write-Error 'Could not determine the latest release tag.'; exit 1 }
 
-$asset = "keepassxc-mcp-$rid.zip"
+$version = $tag.TrimStart('v')
+$asset = "keepassxc-mcp-$version-$rid.zip"
 $base = "https://github.com/$repo/releases/download/$tag"
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "keepassxc-mcp-install-$([guid]::NewGuid())")
 try {
     Write-Host "Latest release: $tag"
-    Invoke-WebRequest "$base/$asset" -OutFile (Join-Path $tmp $asset)
+    try {
+        Invoke-WebRequest "$base/$asset" -OutFile (Join-Path $tmp $asset)
+    } catch {
+        # Releases before v0.2.2 used unversioned asset names.
+        $asset = "keepassxc-mcp-$rid.zip"
+        Invoke-WebRequest "$base/$asset" -OutFile (Join-Path $tmp $asset)
+    }
     Invoke-WebRequest "$base/SHA256SUMS.txt" -OutFile (Join-Path $tmp 'SHA256SUMS.txt')
 
     Write-Host 'Verifying checksum...'

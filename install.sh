@@ -34,13 +34,17 @@ rid="$platform-$archid"
 tag="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
 [ -n "$tag" ] || { echo "Could not determine the latest release tag." >&2; exit 1; }
 
-asset="keepassxc-mcp-$rid.tar.gz"
+asset="keepassxc-mcp-${tag#v}-$rid.tar.gz"
 base="https://github.com/$REPO/releases/download/$tag"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 echo "Latest release: $tag"
-curl -fsSL -o "$tmp/$asset"      "$base/$asset"
+if ! curl -fsSL -o "$tmp/$asset" "$base/$asset"; then
+  # Releases before v0.2.2 used unversioned asset names.
+  asset="keepassxc-mcp-$rid.tar.gz"
+  curl -fsSL -o "$tmp/$asset" "$base/$asset"
+fi
 curl -fsSL -o "$tmp/SHA256SUMS.txt" "$base/SHA256SUMS.txt"
 
 echo "Verifying checksum..."
