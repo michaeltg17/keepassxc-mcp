@@ -126,10 +126,11 @@ jobs:
 
       - name: Archive (${{ matrix.rid }})
         run: |
+          V=${{ needs.release-check.outputs.version }}
           if [[ "${{ matrix.rid }}" == win-* ]]; then
-            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-${{ matrix.rid }}.zip keepassxc-mcp.exe)
+            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ matrix.rid }}.zip keepassxc-mcp.exe)
           else
-            tar -czf keepassxc-mcp-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
+            tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
           fi
 
       - uses: actions/upload-artifact@v4
@@ -176,9 +177,18 @@ jobs:
 
           Docs: https://github.com/michaeltg17/keepassxc-mcp/wiki
           EOF
-          # Append the merged PR's description as this release's notes.
+          # Append the merged PR's changelog. By convention (AGENTS.md) the PR
+          # description starts with a "## Changes" section: copy that into the
+          # release notes; fall back to the whole description if it is absent.
           PR_BODY=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].body // ""' 2>/dev/null || true)
-          if [ -n "$PR_BODY" ]; then printf '\n---\n\n%s\n' "$PR_BODY" >> NOTES.md; fi
+          if [ -n "$PR_BODY" ]; then
+            CHANGES=$(printf '%s\n' "$PR_BODY" | awk '/^## *Changes/{f=1; next} /^## /{if (f) exit} f' | sed '/./,$!d')
+            if [ -n "$CHANGES" ]; then
+              printf '\n---\n\n## Changes\n\n%s\n' "$CHANGES" >> NOTES.md
+            else
+              printf '\n---\n\n%s\n' "$PR_BODY" >> NOTES.md
+            fi
+          fi
           gh release create "v${VERSION}" \
             dist/* \
             --target "${GITHUB_SHA}" \
