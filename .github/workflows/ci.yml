@@ -51,3 +51,127 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
+
+  # Releases ride CI: merging a PR that bumps <Version> in the csproj to main is
+  # the release decision. If a GitHub Release for v<version> already exists, this
+  # job is a no-op — merges that don't bump the version ship nothing.
+  # Recovery for a bad release: delete the Release (and tag) on the Releases page,
+  # then re-run that main push run from the Actions UI.
+  release-check:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      should_release: ${{ steps.exists.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from csproj
+        id: ver
+        run: >
+          echo "version=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassxcMcp/KeePassxcMcp.csproj)"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Skip if release v<version> already published
+        id: exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "v${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "Release v${{ steps.ver.outputs.version }} already exists — nothing to ship." >> "$GITHUB_STEP_SUMMARY"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v${{ steps.ver.outputs.version }} is new — building assets." >> "$GITHUB_STEP_SUMMARY"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-assets:
+    needs: [test, release-check]
+    if: needs.release-check.outputs.should_release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            10.0.x
+
+      # Self-contained single file so users need no .NET install. NOT trimmed: the
+      # ModelContextProtocol SDK relies on reflection (DI + tool discovery).
+      - name: Publish (${{ matrix.rid }})
+        run: |
+          dotnet publish src/KeePassxcMcp/KeePassxcMcp.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false \
+            -o out/${{ matrix.rid }}
+
+      - name: Archive (${{ matrix.rid }})
+        run: |
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-${{ matrix.rid }}.zip keepassxc-mcp.exe)
+          else
+            tar -czf keepassxc-mcp-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asset-${{ matrix.rid }}
+          path: keepassxc-mcp-*
+          if-no-files-found: error
+
+  publish:
+    needs: [test, release-check, build-assets]
+    if: needs.release-check.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: asset-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum keepassxc-mcp-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create release (tag v<version> is created pointing at this commit)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-check.outputs.version }}
+        run: |
+          cat > NOTES.md <<'EOF'
+          Self-contained single-file builds — no .NET install needed. Each archive contains one
+          binary. The external **keepassxc-cli** (KeePassXC ≥ 2.7.x) is still required: it does
+          all kdbx work, and this tool deliberately never bundles it.
+
+          Quick install (picks your platform's asset and verifies `SHA256SUMS.txt`):
+
+          - Linux/macOS: `curl -fsSL https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.sh | bash`
+          - Windows (PowerShell): `irm https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.ps1 | iex`
+
+          Docs: https://github.com/michaeltg17/keepassxc-mcp/wiki
+          EOF
+          # Append the merged PR's description as this release's notes.
+          PR_BODY=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '.[0].body // ""' 2>/dev/null || true)
+          if [ -n "$PR_BODY" ]; then printf '\n---\n\n%s\n' "$PR_BODY" >> NOTES.md; fi
+          gh release create "v${VERSION}" \
+            dist/* \
+            --target "${GITHUB_SHA}" \
+            --title "v${VERSION}" \
+            --notes-file NOTES.md
