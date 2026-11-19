@@ -58,8 +58,10 @@ public sealed class VaultHarness : IDisposable
         StagingPassword: StagingPassword,
         KeepassxcCliPath: CliProbe.Path);
 
-    public void WriteConfigFile() =>
-        File.WriteAllText(Paths.ConfigFile, JsonSerializer.Serialize(Config,
+    public void WriteConfigFile() => WriteConfigFile(Config);
+
+    public void WriteConfigFile(VaultConfig cfg) =>
+        File.WriteAllText(Paths.ConfigFile, JsonSerializer.Serialize(cfg,
             new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
 
     /// <summary>Creates a temp attachment file with random-ish content and returns its path.</summary>

@@ -2,9 +2,14 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main]
+  # Weekly drift check on main even with zero commits: the suite asserts on the
+  # runner's keepassxc-cli behavior, and runners auto-update KeePassXC.
+  schedule:
+    - cron: '23 6 * * 1'   # Mondays 06:23 UTC (off-peak minute)
+  workflow_dispatch:
 
 jobs:
   test:

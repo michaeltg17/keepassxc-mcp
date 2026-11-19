@@ -19,6 +19,9 @@ switch ((args.Length == 0 ? "mcp" : args[0]).ToLowerInvariant())
         return RunPromoteWindow();
     case "status":
         return RunStatus();
+    case "version" or "--version" or "-v":
+        Console.WriteLine($"keepassxc-mcp {AppInfo.Version}");
+        return 0;
     case "help" or "-h" or "--help":
         PrintUsage();
         return 0;
@@ -122,6 +125,7 @@ static int RunStatus()
     }
 
     Console.WriteLine($"config        : {paths.ConfigFile}");
+    Console.WriteLine($"app version   : {AppInfo.Version}");
     Console.WriteLine($"main vault    : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (password + keyfile)" : " (password only)"));
     Console.WriteLine($"staging vault : {cfg.StagingVaultPath}" + (File.Exists(cfg.StagingVaultPath) ? "" : " [not created yet]"));
     Console.WriteLine($"stagingPassword: [REDACTED — lives in config by design; see SECURITY.md]");
@@ -177,6 +181,7 @@ static void PrintUsage()
           keepassxc-mcp promote-window opens `promote` in a new visible terminal window (the launcher
                                        passes no data; a human still types y + the password there).
           keepassxc-mcp status         show config (password redacted), staging contents, pending request.
+          keepassxc-mcp version        print the build version (also: --version).
 
         config: %APPDATA%\keepassxc-mcp\config.json on Windows, ~/.config/keepassxc-mcp/config.json on
         Linux/macOS, or set KEEPASSXC_MCP_CONFIG. Keep config and the kdbx files out of VCS/sync folders.
