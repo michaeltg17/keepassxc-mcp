@@ -6,8 +6,8 @@ It uses keepassxc-cli — the official KeePassXC binary — for every kdbx opera
 
 The master password is only ever typed by a human in their own terminal, never seen by the agent.
 
+See the [wiki](https://github.com/michaeltg17/keepassxc-mcp/wiki) for more info.
+
 ---
 
 Built with the help of local AI using https://github.com/michaeltg17/best-model-dual-3090 and OpenCode.
-
-See the [wiki](https://github.com/michaeltg17/keepassxc-mcp/wiki) for docs.
