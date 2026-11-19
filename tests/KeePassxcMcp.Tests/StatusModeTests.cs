@@ -1,10 +1,31 @@
 using System.Diagnostics;
+using KeePassxcMcp.Infra;
 
 namespace KeePassxcMcp.Tests;
 
 /// <summary>`status` mode: shows config + staging + pending, stagingPassword redacted.</summary>
 public class StatusModeTests
 {
+    [Fact]
+    public async Task Version_PrintsSemver()
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = VaultHarness.ServerExePath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("--version");
+
+        using var proc = Process.Start(psi)!;
+        var stdout = await proc.StandardOutput.ReadToEndAsync();
+        await proc.WaitForExitAsync();
+
+        Assert.Equal(0, proc.ExitCode);
+        Assert.Matches(@"^keepassxc-mcp \d+\.\d+\.\d+", stdout.Trim());
+    }
     [RequiresCliFact]
     public async Task Status_PrintsRedactedConfigAndStagingState()
     {
@@ -28,6 +49,7 @@ public class StatusModeTests
         await proc.WaitForExitAsync();
 
         Assert.Equal(0, proc.ExitCode);
+        Assert.Contains("app version   : " + AppInfo.Version, stdout);
         Assert.Contains($"staged entries: 1", stdout);
         Assert.Contains("StatusEntry", stdout);
         Assert.Contains("pending request : 1 entries", stdout);

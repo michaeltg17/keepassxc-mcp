@@ -19,7 +19,7 @@ public static class Promoter
         // Identity banner: whoever opened this window (human or vault_open_approver), the
         // human can verify WHICH binary is about to prompt for the master password.
         var self = Environment.ProcessPath ?? "";
-        Console.Error.WriteLine($"this executable : {self}");
+        Console.Error.WriteLine($"this executable : {self} (v{AppInfo.Version})");
         if (self.Length > 0 && File.Exists(self))
         {
             var (selfSha, selfSize) = await Hashing.Sha256FileAsync(self, ct);
