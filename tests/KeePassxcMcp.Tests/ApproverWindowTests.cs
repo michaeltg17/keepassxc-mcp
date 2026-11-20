@@ -35,8 +35,8 @@ public class ApproverWindowTests
 
             using var proc = Process.Start(psi)!;
             proc.StandardInput.Close();
-            var stderr = await proc.StandardError.ReadToEndAsync();
-            await proc.WaitForExitAsync();
+            var stderr = await proc.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+            await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
             // no pending request → refuses, but the identity banner always prints first
             Assert.Equal(1, proc.ExitCode);

@@ -40,7 +40,10 @@ public static class CliProbe
 /// <summary>Skips (rather than fails) when keepassxc-cli is not installed.</summary>
 public sealed class RequiresCliFactAttribute : FactAttribute
 {
-    public RequiresCliFactAttribute()
+    public RequiresCliFactAttribute(
+        [System.Runtime.CompilerServices.CallerFilePath] string? sourceFilePath = null,
+        [System.Runtime.CompilerServices.CallerLineNumber] int sourceLineNumber = -1)
+        : base(sourceFilePath, sourceLineNumber)
     {
         if (CliProbe.PathOrNull is null)
             Skip = "keepassxc-cli not available (install KeePassXC or set KEEPASSXC_CLI)";
@@ -49,7 +52,10 @@ public sealed class RequiresCliFactAttribute : FactAttribute
 
 public sealed class RequiresCliTheoryAttribute : TheoryAttribute
 {
-    public RequiresCliTheoryAttribute()
+    public RequiresCliTheoryAttribute(
+        [System.Runtime.CompilerServices.CallerFilePath] string? sourceFilePath = null,
+        [System.Runtime.CompilerServices.CallerLineNumber] int sourceLineNumber = -1)
+        : base(sourceFilePath, sourceLineNumber)
     {
         if (CliProbe.PathOrNull is null)
             Skip = "keepassxc-cli not available (install KeePassXC or set KEEPASSXC_CLI)";

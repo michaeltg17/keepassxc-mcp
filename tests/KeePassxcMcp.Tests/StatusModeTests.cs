@@ -20,8 +20,8 @@ public class StatusModeTests
         psi.ArgumentList.Add("--version");
 
         using var proc = Process.Start(psi)!;
-        var stdout = await proc.StandardOutput.ReadToEndAsync();
-        await proc.WaitForExitAsync();
+        var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, proc.ExitCode);
         Assert.Matches(@"^keepassxc-mcp \d+\.\d+\.\d+", stdout.Trim());
@@ -45,8 +45,8 @@ public class StatusModeTests
         psi.Environment["KEEPASSXC_MCP_CONFIG"] = harness.Paths.ConfigFile;
 
         using var proc = Process.Start(psi)!;
-        var stdout = await proc.StandardOutput.ReadToEndAsync();
-        await proc.WaitForExitAsync();
+        var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(0, proc.ExitCode);
         Assert.Contains("app version   : " + AppInfo.Version, stdout);

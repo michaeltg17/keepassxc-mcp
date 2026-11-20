@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            10.0.x
+            11.0.x
 
       # Integration tests drive the real keepassxc-cli; the suite self-skips without it.
       - name: Install KeePassXC (Linux)
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
-            10.0.x
+            11.0.x
 
       # Self-contained single file so users need no .NET install. NOT trimmed: the
       # ModelContextProtocol SDK relies on reflection (DI + tool discovery).
