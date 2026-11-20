@@ -148,9 +148,16 @@ public class McpE2ETests
             foreach (var window in Process.GetProcessesByName("cmd").Select(p => p.Id)
                          .Where(id => ourServerPids.Contains(parentOf.GetValueOrDefault(id))))
             {
-                try { Process.GetProcessById(window).Kill(entireProcessTree: true); return; }
+                CloseConsoleGracefully(window); // polite: WM_CLOSE to the console window -> WT closes the tab itself
+                try
+                {
+                    using var w = Process.GetProcessById(window);
+                    if (!w.WaitForExit(2000)) w.Kill(entireProcessTree: true); // fallback only
+                    else w.WaitForExit(); // its children (promote) end with the console
+                }
                 catch (ArgumentException) { } // already gone
                 catch (InvalidOperationException) { } // already gone
+                return;
             }
             await Task.Delay(500, TestContext.Current.CancellationToken);
         }
@@ -163,6 +170,38 @@ public class McpE2ETests
             if (parent == Environment.ProcessId) return true;
         return false;
     }
+
+    // Polite console teardown: WM_CLOSE on the console window behaves like clicking its X —
+    // the hosted cmd exits normally and the terminal (Windows Terminal included) closes the
+    // tab itself. A raw Kill would leave the terminal's "process exited" tab behind.
+    private static void CloseConsoleGracefully(int processWithConsole)
+    {
+        FreeConsole(); // detach the test host from its own console for the duration
+        try
+        {
+            if (AttachConsole((uint)processWithConsole))
+            {
+                try
+                {
+                    var hwnd = GetConsoleWindow();
+                    if (hwnd != IntPtr.Zero) PostMessageW(hwnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+                }
+                finally { FreeConsole(); }
+            }
+        }
+        catch { } // best-effort; the tree-kill fallback still stands
+        finally
+        {
+            try { AttachConsole((uint)Environment.ProcessId); } catch { } // restore ours
+        }
+    }
+
+    private const uint WM_CLOSE = 0x0010;
+
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AttachConsole(uint processId);
+    [DllImport("kernel32.dll")] private static extern bool FreeConsole();
+    [DllImport("kernel32.dll")] private static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
 
     // pid -> parent pid, via the standard kernel32 process snapshot.
     private static Dictionary<int, int> SnapshotParentPids()
