@@ -12,4 +12,4 @@ See the [wiki](https://github.com/michaeltg17/keepassxc-mcp/wiki) for more info.
 
 ---
 
-Built with the help of local AI using https://github.com/michaeltg17/best-model-dual-3090 and OpenCode.
+Built with [my AI setup](https://github.com/michaeltg17/my-AI-setup).
