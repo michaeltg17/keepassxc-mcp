@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using KeePassxcMcp.Infra;
 using ModelContextProtocol.Client;
@@ -117,11 +119,92 @@ public class McpE2ETests
         {
             await using var client = await ConnectAsync(harness);
             enabledReply = Text(await client.CallToolAsync("vault_open_approver", new Dictionary<string, object?>()));
+            if (enabledReply.Contains("opened via"))
+                await CloseApproverWindowsAsync();
         }
         Assert.True(
             enabledReply.Contains("Approver window opened via") || enabledReply.Contains("Could not open an approver window"),
             "expected a launched window or the honest manual fallback, got: " + enabledReply);
         Assert.NotNull(PendingRequest.TryLoad(harness.Paths)); // the launcher never consumes the request
+    }
+
+    /// <summary>Test hygiene only: the approver window opened above stays open on purpose
+    /// (cmd /k keeps the outcome readable for a human) — that is correct product behavior,
+    /// so it is closed HERE, never in product code. Located via the real chain:
+    /// this test → MCP server child (cmd's parent) → cmd window → its promote child.</summary>
+    private static async Task CloseApproverWindowsAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return; // other launchers have no such child tree
+        var serverName = Path.GetFileNameWithoutExtension(VaultHarness.ServerExePath);
+        for (var attempt = 0; attempt < 10; attempt++) // the window takes a moment to appear
+        {
+            var parentOf = SnapshotParentPids();
+            // OUR server processes only (not e.g. the user's live MCP connection): the
+            // parent chain must lead back to this test process, however deeply nested.
+            var ourServerPids = Process.GetProcessesByName(serverName)
+                .Select(p => p.Id)
+                .Where(id => TracesToThisTest(id, parentOf))
+                .ToHashSet();
+            foreach (var window in Process.GetProcessesByName("cmd").Select(p => p.Id)
+                         .Where(id => ourServerPids.Contains(parentOf.GetValueOrDefault(id))))
+            {
+                try { Process.GetProcessById(window).Kill(entireProcessTree: true); return; }
+                catch (ArgumentException) { } // already gone
+                catch (InvalidOperationException) { } // already gone
+            }
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+        }
+        // Not found: the verdict above already stands; hygiene must never change it.
+    }
+
+    private static bool TracesToThisTest(int pid, IReadOnlyDictionary<int, int> parentOf)
+    {
+        for (var hop = 0; hop < 8 && parentOf.TryGetValue(pid, out var parent); pid = parent)
+            if (parent == Environment.ProcessId) return true;
+        return false;
+    }
+
+    // pid -> parent pid, via the standard kernel32 process snapshot.
+    private static Dictionary<int, int> SnapshotParentPids()
+    {
+        var map = new Dictionary<int, int>();
+        var snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap.ToInt64() is 0 or -1) return map;
+        try
+        {
+            var entry = new ProcessEntry32 { DwSize = (uint)Marshal.SizeOf<ProcessEntry32>() };
+            if (!Process32First(snap, ref entry)) return map;
+            do map[(int)entry.Th32ProcessId] = (int)entry.Th32ParentProcessId;
+            while (Process32Next(snap, ref entry));
+        }
+        catch
+        {
+            // best-effort: an empty map just means "nothing to close this attempt"
+        }
+        finally { CloseHandle(snap); }
+        return map;
+    }
+
+    private const uint TH32CS_SNAPPROCESS = 0x2;
+
+    [DllImport("kernel32.dll")] private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ProcessEntry32
+    {
+        public uint DwSize;
+        public uint CntUsage;
+        public uint Th32ProcessId;
+        public IntPtr Th32DefaultHeapId;
+        public uint Th32ModuleId;
+        public uint CntThreads;
+        public uint Th32ParentProcessId;
+        public int PcPriClassBase;
+        public uint DwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string ExeFile;
     }
 
     private static async Task<McpClient> ConnectAsync(VaultHarness harness)
