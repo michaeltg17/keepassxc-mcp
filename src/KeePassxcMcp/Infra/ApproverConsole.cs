@@ -32,12 +32,14 @@ public static class ApproverConsole
         }
     }
 
-    public static string ReadPassword(string prompt)
+    /// <summary>Reads a password; null when stdin is closed (EOF — automation/tests only,
+    /// a real terminal ends interaction via Enter/Esc/Ctrl+C instead).</summary>
+    public static string? ReadPassword(string prompt)
     {
         Console.Error.Write(prompt);
         if (Console.IsInputRedirected)
         {
-            var line = Console.ReadLine() ?? "";
+            var line = Console.ReadLine();
             Console.Error.WriteLine();
             return line;
         }

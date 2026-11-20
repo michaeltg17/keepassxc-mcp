@@ -105,19 +105,56 @@ public class PromoteCliTests
     }
 
     [RequiresCliFact]
-    public async Task WrongPassword_MergesNothing()
+    public async Task WrongPasswordThenEof_AbortsAsNoOp()
     {
         using var h = await VaultHarness.CreateAsync();
         await h.StageAsync("Inbox", "Protected", "body", h.CreateAttachmentFile("y.bin", 64));
         await h.RecordPromotionRequestAsync();
 
+        // attempt 1 wrong, attempt 2 hits closed stdin (EOF) -> clean no-op abort
         var (exit, _, stderr) = await RunPromoteAsync(h, "y", "totally-wrong-password");
 
-        Assert.Equal(1, exit);
-        Assert.Contains("Dry-run failed", stderr);
+        Assert.Equal(2, exit);
+        Assert.Contains("Attempt failed", stderr);
+        Assert.Contains("Input closed at the password prompt", stderr);
         Assert.False(await h.MainHasEntryAsync("Inbox/Protected"));
         Assert.Single(await h.StagedEntryPathsAsync());
         Assert.NotNull(PendingRequest.TryLoad(h.Paths));
+    }
+
+    [RequiresCliFact]
+    public async Task WrongThenEmptyThenCorrect_MergesOnThirdAttempt()
+    {
+        using var h = await VaultHarness.CreateAsync();
+        await h.StageAsync("Inbox", "Retryable", "body", h.CreateAttachmentFile("z.bin", 64));
+        await h.RecordPromotionRequestAsync();
+
+        var (exit, stdout, stderr) = await RunPromoteAsync(h, "y", "wrong-one", "", VaultHarness.MainPassword);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("attempt 1/3", stderr);
+        Assert.Contains("Empty password", stderr);
+        Assert.Matches("Added:|Creating missing", stdout);
+        Assert.True(await h.MainHasEntryAsync("Inbox/Retryable"));
+        Assert.Empty(await h.StagedEntryPathsAsync());
+        Assert.Null(PendingRequest.TryLoad(h.Paths));
+    }
+
+    [RequiresCliFact]
+    public async Task ThreeFailedAttempts_StopsCleanly_KeepsEverything()
+    {
+        using var h = await VaultHarness.CreateAsync();
+        await h.StageAsync("Inbox", "Guarded", "body", h.CreateAttachmentFile("w.bin", 64));
+        await h.RecordPromotionRequestAsync();
+
+        var (exit, _, stderr) = await RunPromoteAsync(h, "y", "wrong-1", "wrong-2", "wrong-3");
+
+        Assert.Equal(1, exit);
+        Assert.Contains("attempt 3/3", stderr);
+        Assert.Contains("3 password attempts failed", stderr);
+        Assert.False(await h.MainHasEntryAsync("Inbox/Guarded"));
+        Assert.Single(await h.StagedEntryPathsAsync());           // staging kept
+        Assert.NotNull(PendingRequest.TryLoad(h.Paths));          // request kept
     }
 
     [RequiresCliFact]

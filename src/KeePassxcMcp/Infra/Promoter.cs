@@ -7,7 +7,7 @@ namespace KeePassxcMcp.Infra;
 /// code path in the whole product that ever touches the main vault password — and it goes
 /// from the masked console prompt straight into keepassxc-cli's stdin. The agent side
 /// (MCP stdio server) can neither see, request, nor receive it.
-/// Exit codes: 0 merged, 1 error/no-request, 2 denied/aborted (no-op).
+/// Exit codes: 0 merged, 1 error/no-request/3 failed password attempts, 2 denied/aborted (no-op).
 /// </summary>
 public static class Promoter
 {
@@ -66,26 +66,44 @@ public static class Promoter
             return ExitDenied;
         }
 
-        var password = ApproverConsole.ReadPassword("Master password for the main vault (input hidden): ");
-        if (password.Length == 0)
+        // Password attempts: the dry-run doubles as a READ-ONLY credential probe —
+        // nothing is written to the main vault until a password has passed it.
+        // A wrong or empty password consumes an attempt and re-prompts (max 3).
+        // EOF at this prompt cannot be re-read, so it aborts as a clean no-op.
+        const int MaxPasswordAttempts = 3;
+        var password = string.Empty;
+        CliResult? dry = null;
+        for (var attempt = 1; attempt <= MaxPasswordAttempts; attempt++)
         {
-            Console.Error.WriteLine("Empty password — aborting. Nothing changed.");
-            return ExitDenied;
+            var entered = ApproverConsole.ReadPassword($"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ");
+            if (entered is null)
+            {
+                Console.Error.WriteLine("Input closed at the password prompt — aborting. Nothing changed.");
+                return ExitDenied;
+            }
+            if (entered.Length == 0)
+            {
+                Console.Error.WriteLine("Empty password — not tried against the vault.");
+                continue;
+            }
+            password = entered;
+
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("merge --dry-run (computed now against the current main vault):");
+            dry = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: true, ct: ct);
+            if (dry.Success) break;
+
+            Console.Error.WriteLine("Attempt failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets));
+            password = string.Empty;
+        }
+        if (dry is not { Success: true })
+        {
+            Console.Error.WriteLine($"{MaxPasswordAttempts} password attempts failed — nothing was written; staging and request kept. Run `keepassxc-mcp promote` again when ready.");
+            return ExitError;
         }
 
         try
         {
-            // The real merge diff is computed HERE, at approval time, by the only process
-            // that can unlock the main vault. It is never agent-generated or pre-stored.
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("merge --dry-run (computed now against the current main vault):");
-            var dry = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: true, ct: ct);
-            if (!dry.Success)
-            {
-                Console.Error.WriteLine("Dry-run failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets));
-                Console.Error.WriteLine("Nothing changed.");
-                return ExitError;
-            }
             Console.WriteLine(string.Join("\n", dry.StdOut
                 .Replace("\r\n", "\n")
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
