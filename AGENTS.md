@@ -11,6 +11,9 @@ Read before making changes in this repo.
   release is intended** — it changes shipped binaries, not workflow files.
 - Every user-visible behavior is tested e2e (real keepassxc-cli, child processes,
   or stdio JSON-RPC). Do not add mock-based unit tests.
+- After each release and after updating the installed binary, run the real-vault manual
+  verification in `MANUAL_TEST.md` — the automated suite never touches a real vault or a
+  real human at a password prompt; that drill does.
 
 ## PR description format (this becomes the release notes)
 
