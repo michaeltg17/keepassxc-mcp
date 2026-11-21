@@ -7,13 +7,26 @@ namespace KeePassxcMcp.Infra;
 /// code path in the whole product that ever touches the main vault password — and it goes
 /// from the masked console prompt straight into keepassxc-cli's stdin. The agent side
 /// (MCP stdio server) can neither see, request, nor receive it.
-/// Exit codes: 0 merged, 1 error/no-request, 2 denied/aborted (no-op).
 /// </summary>
 public static class Promoter
 {
-    public const int ExitOk = 0, ExitError = 1, ExitDenied = 2;
+    /// <summary>The documented exit-code contract of `keepassxc-mcp promote` (see the wiki
+    /// "Refusals are no-ops" table). Everything internal speaks this type; ints appear only
+    /// at the OS process boundary. (`promote` with an unreadable config exits 2 from
+    /// Program.cs like every other mode — a usage error, outside this contract.)</summary>
+    public enum Exit
+    {
+        /// <summary>Merged, verified, staging flushed, request cleared.</summary>
+        Ok = 0,
+        /// <summary>Error: no request, CLI/merge failure, 3 failed password attempts, or post-merge verification problems.</summary>
+        Error = 1,
+        /// <summary>The human denied or the input closed (EOF) — a clean no-op.</summary>
+        Denied = 2,
+        /// <summary>Ctrl+C at a terminal prompt.</summary>
+        Cancelled = 130,
+    }
 
-    public static async Task<int> RunAsync(VaultConfig cfg, ConfigPaths paths, KeePassCli cli, CancellationToken ct = default)
+    public static async Task<Exit> RunAsync(VaultConfig cfg, ConfigPaths paths, KeePassCli cli, CancellationToken ct = default)
     {
         Console.Error.WriteLine("keepassxc-mcp promote — human approval for staged vault changes");
         // Identity banner: whoever opened this window (human or vault_open_approver), the
@@ -35,12 +48,12 @@ public static class Promoter
         {
             Console.Error.WriteLine();
             Console.Error.WriteLine("No pending promotion request. Nothing to do — the agent must call vault_promote first.");
-            return ExitError;
+            return Exit.Error;
         }
         if (!File.Exists(cfg.MainVaultPath))
         {
             Console.Error.WriteLine($"Main vault not found at {cfg.MainVaultPath}. Nothing changed.");
-            return ExitError;
+            return Exit.Error;
         }
 
         var state = PromoterState.Load(paths);
@@ -63,29 +76,47 @@ public static class Promoter
         if (!ApproverConsole.Confirm($"Merge these {request.Entries.Count} entries into {cfg.MainVaultPath}? [y/N] "))
         {
             Console.Error.WriteLine("Denied. Staging and vault untouched; request kept.");
-            return ExitDenied;
+            return Exit.Denied;
         }
 
-        var password = ApproverConsole.ReadPassword("Master password for the main vault (input hidden): ");
-        if (password.Length == 0)
+        // Password attempts: the dry-run doubles as a READ-ONLY credential probe —
+        // nothing is written to the main vault until a password has passed it.
+        // A wrong or empty password consumes an attempt and re-prompts (max 3).
+        // EOF at this prompt cannot be re-read, so it aborts as a clean no-op.
+        const int MaxPasswordAttempts = 3;
+        var password = string.Empty;
+        CliResult? dry = null;
+        for (var attempt = 1; attempt <= MaxPasswordAttempts; attempt++)
         {
-            Console.Error.WriteLine("Empty password — aborting. Nothing changed.");
-            return ExitDenied;
+            var entered = ApproverConsole.ReadPassword($"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ");
+            if (entered is null)
+            {
+                Console.Error.WriteLine("Input closed at the password prompt — aborting. Nothing changed.");
+                return Exit.Denied;
+            }
+            if (entered.Length == 0)
+            {
+                Console.Error.WriteLine("Empty password — not tried against the vault.");
+                continue;
+            }
+            password = entered;
+
+            Console.Error.WriteLine();
+            Console.Error.WriteLine("merge --dry-run (computed now against the current main vault):");
+            dry = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: true, ct: ct);
+            if (dry.Success) break;
+
+            Console.Error.WriteLine("Attempt failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets));
+            password = string.Empty;
+        }
+        if (dry is not { Success: true })
+        {
+            Console.Error.WriteLine($"{MaxPasswordAttempts} password attempts failed — nothing was written; staging and request kept. Run `keepassxc-mcp promote` again when ready.");
+            return Exit.Error;
         }
 
         try
         {
-            // The real merge diff is computed HERE, at approval time, by the only process
-            // that can unlock the main vault. It is never agent-generated or pre-stored.
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("merge --dry-run (computed now against the current main vault):");
-            var dry = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: true, ct: ct);
-            if (!dry.Success)
-            {
-                Console.Error.WriteLine("Dry-run failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets));
-                Console.Error.WriteLine("Nothing changed.");
-                return ExitError;
-            }
             Console.WriteLine(string.Join("\n", dry.StdOut
                 .Replace("\r\n", "\n")
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -97,7 +128,7 @@ public static class Promoter
             {
                 Console.Error.WriteLine("merge failed: " + Redact.Apply(merge.FailureSummary, cfg.KnownSecrets));
                 Console.Error.WriteLine("The main vault was not written.");
-                return ExitError;
+                return Exit.Error;
             }
 
             Console.Error.WriteLine();
@@ -129,7 +160,7 @@ public static class Promoter
                 Console.Error.WriteLine("WARNING: merge ran but verification FAILED:");
                 foreach (var p in problems) Console.Error.WriteLine("  - " + p);
                 Console.Error.WriteLine("Staging was NOT flushed and the request is kept — inspect, then re-run promote.");
-                return ExitError;
+                return Exit.Error;
             }
 
             await new StagingMaintenance(cli, cfg).FlushAsync(ct);
@@ -140,7 +171,7 @@ public static class Promoter
             PendingRequest.Clear(paths);
 
             Console.Error.WriteLine($"OK: {request.Entries.Count} entries promoted to the main vault; staging flushed; pending request cleared.");
-            return ExitOk;
+            return Exit.Ok;
         }
         finally
         {

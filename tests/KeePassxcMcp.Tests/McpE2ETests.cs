@@ -117,6 +117,8 @@ public class McpE2ETests
         {
             await using var client = await ConnectAsync(harness);
             enabledReply = Text(await client.CallToolAsync("vault_open_approver", new Dictionary<string, object?>()));
+            if (enabledReply.Contains("opened via"))
+                await ApproverWindowCloser.CloseOpenedWindowAsync(VaultHarness.ServerExePath, TestContext.Current.CancellationToken);
         }
         Assert.True(
             enabledReply.Contains("Approver window opened via") || enabledReply.Contains("Could not open an approver window"),
