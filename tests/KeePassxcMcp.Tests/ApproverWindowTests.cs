@@ -39,7 +39,7 @@ public class ApproverWindowTests
             await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
             // no pending request → refuses, but the identity banner always prints first
-            Assert.Equal(1, proc.ExitCode);
+            Assert.Equal((int)Promoter.Exit.Error, proc.ExitCode);
             Assert.Contains(VaultHarness.ServerExePath, stderr);
             Assert.Contains($"(v{AppInfo.Version})", stderr);
             Assert.Matches(@"its sha256\s*: [0-9a-f]{64}", stderr);

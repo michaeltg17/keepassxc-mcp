@@ -91,10 +91,10 @@ static async Task<int> RunPromoteAsync()
         e.Cancel = true;
         Console.Error.WriteLine();
         Console.Error.WriteLine("Aborted (Ctrl+C). Staging and vault untouched.");
-        Environment.Exit(130);
+        Environment.Exit((int)Promoter.Exit.Cancelled);
     };
 
-    return await Promoter.RunAsync(cfg, paths, new KeePassCli(cfg.KeepassxcCliPath));
+    return (int)await Promoter.RunAsync(cfg, paths, new KeePassCli(cfg.KeepassxcCliPath));
 }
 
 static int RunPromoteWindow()

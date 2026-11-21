@@ -8,7 +8,7 @@ namespace KeePassxcMcp.Tests;
 /// process feeding stdin ("y\n&lt;pw&gt;\n" / deny "n"), exactly the human flow.</summary>
 public class PromoteCliTests
 {
-    private static async Task<(int Exit, string StdOut, string StdErr)> RunPromoteAsync(
+    private static async Task<(Promoter.Exit Exit, string StdOut, string StdErr)> RunPromoteAsync(
         VaultHarness harness, params string[] stdinLines)
     {
         var psi = new ProcessStartInfo
@@ -29,7 +29,8 @@ public class PromoteCliTests
         var stdout = await proc.StandardOutput.ReadToEndAsync();
         var stderr = await proc.StandardError.ReadToEndAsync();
         await proc.WaitForExitAsync();
-        return (proc.ExitCode, stdout, stderr);
+        // the OS int meets the typed contract exactly here:
+        return ((Promoter.Exit)proc.ExitCode, stdout, stderr);
     }
 
     [RequiresCliFact]
@@ -43,7 +44,7 @@ public class PromoteCliTests
 
         var (exit, stdout, stderr) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
 
-        Assert.Equal(0, exit);
+        Assert.Equal(Promoter.Exit.Ok, exit);
         // dry-run diff printed on stdout (the human's actual review surface):
         Assert.Matches("Added:|Creating missing", stdout);
         Assert.Contains("Contract", stderr + stdout);
@@ -73,7 +74,7 @@ public class PromoteCliTests
 
         var (exit, stdout, _) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
 
-        Assert.Equal(0, exit);
+        Assert.Equal(Promoter.Exit.Ok, exit);
         Assert.Matches("Added:|Creating missing", stdout);
         Assert.True(await h.MainHasEntryAsync("Inbox/WithKeyfile"));
         Assert.Empty(await h.StagedEntryPathsAsync());
@@ -88,7 +89,7 @@ public class PromoteCliTests
 
         var (exit, _, stderr) = await RunPromoteAsync(h, "n");
 
-        Assert.Equal(2, exit);
+        Assert.Equal(Promoter.Exit.Denied, exit);
         Assert.Contains("Denied", stderr);
         Assert.False(await h.MainHasEntryAsync("Inbox/DeniedEntry"));
         Assert.Single(await h.StagedEntryPathsAsync());          // staging untouched
@@ -100,7 +101,7 @@ public class PromoteCliTests
     {
         using var h = await VaultHarness.CreateAsync();
         var (exit, _, stderr) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
-        Assert.Equal(1, exit);
+        Assert.Equal(Promoter.Exit.Error, exit);
         Assert.Contains("No pending promotion request", stderr);
     }
 
@@ -114,7 +115,7 @@ public class PromoteCliTests
         // attempt 1 wrong, attempt 2 hits closed stdin (EOF) -> clean no-op abort
         var (exit, _, stderr) = await RunPromoteAsync(h, "y", "totally-wrong-password");
 
-        Assert.Equal(2, exit);
+        Assert.Equal(Promoter.Exit.Denied, exit);
         Assert.Contains("Attempt failed", stderr);
         Assert.Contains("Input closed at the password prompt", stderr);
         Assert.False(await h.MainHasEntryAsync("Inbox/Protected"));
@@ -131,7 +132,7 @@ public class PromoteCliTests
 
         var (exit, stdout, stderr) = await RunPromoteAsync(h, "y", "wrong-one", "", VaultHarness.MainPassword);
 
-        Assert.Equal(0, exit);
+        Assert.Equal(Promoter.Exit.Ok, exit);
         Assert.Contains("attempt 1/3", stderr);
         Assert.Contains("Empty password", stderr);
         Assert.Matches("Added:|Creating missing", stdout);
@@ -149,7 +150,7 @@ public class PromoteCliTests
 
         var (exit, _, stderr) = await RunPromoteAsync(h, "y", "wrong-1", "wrong-2", "wrong-3");
 
-        Assert.Equal(1, exit);
+        Assert.Equal(Promoter.Exit.Error, exit);
         Assert.Contains("attempt 3/3", stderr);
         Assert.Contains("3 password attempts failed", stderr);
         Assert.False(await h.MainHasEntryAsync("Inbox/Guarded"));
