@@ -6,11 +6,14 @@ Read before making changes in this repo.
 
 - Work on `dev`, open PRs to `main` **from `dev` only** (CI runs on dev pushes and
   gates the PR; PRs from other branches have no checks and block safely).
-- Merging a PR that bumps `<Version>` in `src/KeePassxcMcp/KeePassxcMcp.csproj`
+- Merging a PR that bumps `<Version>` in `src/KeePassXCMcp/KeePassXCMcp.csproj`
   publishes the GitHub Release automatically. **Only bump the version when a real
   release is intended** — it changes shipped binaries, not workflow files.
 - Every user-visible behavior is tested e2e (real keepassxc-cli, child processes,
   or stdio JSON-RPC). Do not add mock-based unit tests.
+- After each release and after updating the installed binary, run the real-vault manual
+  verification in `MANUAL_TEST.md` — the automated suite never touches a real vault or a
+  real human at a password prompt; that drill does.
 
 ## PR description format (this becomes the release notes)
 
