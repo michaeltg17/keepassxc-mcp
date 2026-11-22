@@ -31,13 +31,17 @@ $rid = switch (${env:PROCESSOR_ARCHITECTURE}) {
 
 $prerelease = $env:KEEPASSXC_MCP_PRERELEASE -eq '1'
 if ($prerelease) {
-    $latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=30" |
-        Where-Object { $_.prerelease -and -not $_.draft } | Select-Object -First 1
+    # Deliberately not Invoke-RestMethod: on some stacks it hands back a single
+    # odd object for a JSON array, which silently breaks the filter below.
+    # Explicit text -> ConvertFrom-Json, @() forces a real pipeline array.
+    $resp = Invoke-WebRequest "https://api.github.com/repos/$repo/releases?per_page=30" -UseBasicParsing
+    $all = @($resp.Content | ConvertFrom-Json)
+    $latest = $all | Where-Object { $_.prerelease -and -not $_.draft } | Select-Object -First 1
 } else {
     $latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
 }
-$tag = $latest.tag_name
-if (-not $tag) { Write-Error 'Could not determine the latest release tag.'; exit 1 }
+$tag = if ($latest) { $latest.tag_name } else { $null }
+if (-not $tag) { Write-Error "Could not determine the latest release tag (prerelease opt-in: $prerelease)."; exit 1 }
 
 # Some prerelease tags carry +<sha> build metadata; assets are named without it.
 $version = ($tag.TrimStart('v') -split '\+')[0]
