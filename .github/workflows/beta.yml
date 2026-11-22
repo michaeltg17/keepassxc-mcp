@@ -31,7 +31,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Refuse to beta an untested or failed commit
         env:
@@ -69,9 +69,9 @@ jobs:
         rid: [win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             11.0.x
@@ -98,7 +98,7 @@ jobs:
             tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: beta-asset-${{ matrix.rid }}
           path: keepassxc-mcp-*
@@ -112,9 +112,9 @@ jobs:
     steps:
       # gh infers the repo from the git checkout — without this it fails with
       # "failed to run git: not a git repository".
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: beta-asset-*
           merge-multiple: true
