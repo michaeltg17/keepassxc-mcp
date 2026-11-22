@@ -16,6 +16,33 @@ public sealed record CliResult(int ExitCode, string StdOut, string StdErr)
 
 public sealed class KeePassCliException(string message) : Exception(message);
 
+/// <summary>Password generation profile passed to keepassxc-cli's own generator
+/// (`add -g` / `edit -g`). The generator lives in the official binary — this repo
+/// holds no password-generation code (the `-L` length maps to keepassxc-cli's range).</summary>
+public sealed record GenProfile(int Length = 32)
+{
+    public bool Lower { get; init; } = true;
+    public bool Upper { get; init; } = true;
+    public bool Numeric { get; init; } = true;
+    public bool Special { get; init; } = true;
+    public bool EveryGroup { get; init; } = true;
+
+    public List<string> ArgFlags()
+    {
+        if (Length is < 6 or > 128)
+            throw new ArgumentException("length must be between 6 and 128.");
+        var flags = new List<string> { "-L", Length.ToString() };
+        if (Lower) flags.Add("-l");
+        if (Upper) flags.Add("-U");
+        if (Numeric) flags.Add("-n");
+        if (Special) flags.Add("-s");
+        if (!(Lower || Upper || Numeric || Special))
+            throw new ArgumentException("at least one character class must be enabled.");
+        if (EveryGroup && Lower && Upper && Numeric && Special) flags.Add("--every-group");
+        return flags;
+    }
+}
+
 /// <summary>
 /// Process runner for the official keepassxc-cli. All invocation is via argv arrays —
 /// never shell strings — and unlock passwords are fed ONLY through stdin, never argv.
@@ -76,6 +103,11 @@ public sealed class KeePassCli(string exePath)
     }
 
     // ---- typed wrappers ----------------------------------------------------
+
+    /// <summary>Read-only unlock probe: `ls -q -f` succeeds only with a valid key.
+    /// Used by the reader mode to validate the typed master password before going idle.</summary>
+    public Task<CliResult> UnlockProbeAsync(string dbPath, string password, string? keyfilePath, CancellationToken ct = default)
+        => RunAsync(WithKeyfile(["ls", "-q", "-f"], keyfilePath).Concat([dbPath]).ToList(), [password], ct);
 
     /// <summary>`db-create -p <db>` (+ optional keyfile). kdbx cannot have empty password
     /// AND empty keyfile, so the password is format-mandatory. Prompts twice: pw, repeat.</summary>
@@ -143,6 +175,58 @@ public sealed class KeePassCli(string exePath)
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(line => !line.EndsWith('/') && line != "[empty]") // "[empty]" is keepassxc-cli's sentinel for empty groups
             .ToList();
+    }
+
+    /// <summary>`search` — path-per-line results (verified format). Never prints secret values.</summary>
+    public Task<CliResult> SearchAsync(string dbPath, string password, string? keyfilePath, string term, CancellationToken ct = default)
+        => RunCheckedAsync(WithKeyfile(["search", "-q"], keyfilePath).Concat([dbPath, term]).ToList(), [password], ct);
+
+    /// <summary>`add -g` — creates the entry with a password generated INSIDE keepassxc-cli;
+    /// the value never enters this process. Entry stays unlocked for readback (db password only).</summary>
+    public Task<CliResult> AddGeneratedAsync(string dbPath, string password, string? keyfilePath, string entryPath, GenProfile profile, string? notes, CancellationToken ct = default)
+    {
+        var args = new List<string> { "add", "-q", "-g" };
+        args.AddRange(profile.ArgFlags());
+        if (!string.IsNullOrEmpty(notes)) { args.Add("--notes"); args.Add(notes); }
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password], ct);
+    }
+
+    /// <summary>`add -p` — entry password supplied on stdin (db pw, entry pw, repeat).</summary>
+    public Task<CliResult> AddWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, string entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
+    {
+        var args = new List<string> { "add", "-q", "-p" };
+        if (!string.IsNullOrEmpty(notes)) { args.Add("--notes"); args.Add(notes); }
+        if (!string.IsNullOrEmpty(username)) { args.Add("-u"); args.Add(username); }
+        if (!string.IsNullOrEmpty(url)) { args.Add("--url"); args.Add(url); }
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue, entryValue], ct);
+    }
+
+    /// <summary>`edit -p` — replaces the entry password from stdin (db pw, new entry pw, repeat).</summary>
+    public Task<CliResult> EditWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, string entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
+    {
+        var args = new List<string> { "edit", "-q", "-p" };
+        if (notes is not null) { args.Add("--notes"); args.Add(notes); }
+        if (!string.IsNullOrEmpty(username)) { args.Add("-u"); args.Add(username); }
+        if (!string.IsNullOrEmpty(url)) { args.Add("--url"); args.Add(url); }
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue, entryValue], ct);
+    }
+
+    /// <summary>`edit -g` — regenerates the entry password inside keepassxc-cli (rotation).</summary>
+    public Task<CliResult> EditGeneratedAsync(string dbPath, string password, string? keyfilePath, string entryPath, GenProfile profile, CancellationToken ct = default)
+    {
+        var args = new List<string> { "edit", "-q", "-g" };
+        args.AddRange(profile.ArgFlags());
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password], ct);
+    }
+
+    /// <summary>Read ONE entry attribute in clear text (`show -s -a Password`). The value
+    /// lands in this process's memory only — for fingerprinting after generation/rotation.
+    /// The agent never sees it unless a tool result explicitly says so.</summary>
+    public async Task<string> ReadAttributeAsync(string dbPath, string password, string? keyfilePath, string entryPath, string attribute, CancellationToken ct = default)
+    {
+        var result = await RunCheckedAsync(
+            WithKeyfile(["show", "-q", "-s", "-a", attribute], keyfilePath).Concat([dbPath, entryPath]).ToList(), [password], ct);
+        return result.StdOut.TrimEnd('\r', '\n');
     }
 
     /// <summary>`merge` (or `merge --dry-run`). keepassxc-cli prompts for the MAIN password

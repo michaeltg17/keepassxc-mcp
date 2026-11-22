@@ -17,6 +17,10 @@ switch ((args.Length == 0 ? "mcp" : args[0]).ToLowerInvariant())
         return await RunPromoteAsync();
     case "promote-window":
         return RunPromoteWindow();
+    case "reader":
+        return await RunReaderAsync(args);
+    case "reader-window":
+        return RunReaderWindow();
     case "status":
         return RunStatus();
     case "version" or "--version" or "-v":
@@ -110,6 +114,64 @@ static int RunPromoteWindow()
     return 1;
 }
 
+/// <summary>Human-run reader mode: types the master password once, then services main-vault
+/// reads over the file protocol (SPEC.md E1). `--server <pid>` from vault_reader_open
+/// enables the orphan guard; human-launched sessions have none (they idle out instead).</summary>
+static async Task<int> RunReaderAsync(string[] args)
+{
+    VaultConfig cfg;
+    ConfigPaths paths;
+    try
+    {
+        (cfg, paths) = ConfigLoader.Load();
+    }
+    catch (ConfigException ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        return 2;
+    }
+
+    var serverPid = 0;
+    if (Flag(args, "--server") is { } s)
+    {
+        if (!int.TryParse(s, out serverPid))
+        {
+            Console.Error.WriteLine("--server expects a numeric pid.");
+            return 2;
+        }
+    }
+
+    Console.CancelKeyPress += (_, e) =>
+    {
+        e.Cancel = true;
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Closed (Ctrl+C). Nothing was ever read or written.");
+        Environment.Exit(0);
+    };
+
+    return await ReaderRunner.RunAsync(cfg, paths, new KeePassCli(cfg.KeepassxcCliPath), serverPid);
+}
+
+static int RunReaderWindow()
+{
+    var result = ApproverLauncher.TryOpenReaderWindow(serverPid: 0); // CLI-launched: no orphan watch, idles out
+    if (result.Launched)
+    {
+        Console.WriteLine($"Reader window opened: {result.Detail}");
+        Console.WriteLine("Type the master password once in that window; reads are served until it closes.");
+        return 0;
+    }
+    Console.Error.WriteLine("Could not open a reader window: " + result.Detail);
+    return 1;
+}
+
+static string? Flag(string[] args, string name)
+{
+    for (var i = 0; i < args.Length - 1; i++)
+        if (args[i] == name) return args[i + 1];
+    return null;
+}
+
 static int RunStatus()
 {
     VaultConfig cfg;
@@ -155,6 +217,11 @@ static int RunStatus()
         ? "pending request : none"
         : $"pending request : {pending.Entries.Count} entries, {pending.Attachments.Count} attachments, requested {pending.RequestedAtUtc:O}");
 
+    if (ReaderProtocol.TryGetLiveSession(paths, out var reader))
+        Console.WriteLine($"reader session  : OPEN (pid {reader.Pid} since {reader.OpenedAtUtc:O}, idle {reader.IdleMinutes} min) — reads only");
+    else
+        Console.WriteLine("reader session  : none (start with `keepassxc-mcp reader` — a main-vault READ session)");
+
     var state = PromoterState.Load(paths);
     Console.WriteLine(state.LastPromotedUtc is { } lp
         ? $"last promote    : {lp:O} ({state.LastPromotedEntryCount} entries)"
@@ -170,17 +237,24 @@ static int RunStatus()
 static void PrintUsage()
 {
     Console.Error.WriteLine("""
-        keepassxc-mcp — MCP server + approver CLI for a KeePassXC vault (staging → human approval → merge)
+        keepassxc-mcp — MCP server + approver/reader CLI for a KeePassXC vault
+                      (writes: staging → human approval → merge; reads: human-opened read session)
 
         usage:
-          keepassxc-mcp                stdio MCP server for the agent (tools: vault_stage_entry,
-                                       vault_list_staged, vault_promote, vault_open_approver).
+          keepassxc-mcp                stdio MCP server for the agent. Tools: vault_stage_entry,
+                                       vault_list_staged, vault_promote, vault_open_approver,
+                                       vault_reader_open/close, vault_search, vault_get.
                                        NEVER touches the main vault password.
           keepassxc-mcp promote        HUMAN approver: review the staged request + live merge dry-run,
                                        confirm, type the master password. Run this in a real terminal.
           keepassxc-mcp promote-window opens `promote` in a new visible terminal window (the launcher
                                        passes no data; a human still types y + the password there).
-          keepassxc-mcp status         show config (password redacted), staging contents, pending request.
+          keepassxc-mcp reader         HUMAN read session: type the master password ONCE; serves
+                                       main-vault reads (paths + metadata, never values) until
+                                       close/idle. Writes never happen here.
+          keepassxc-mcp reader-window  opens `reader` in a new visible terminal window.
+          keepassxc-mcp status         show config (password redacted), staging contents, pending
+                                       request, reader session, provenance summary.
           keepassxc-mcp version        print the build version (also: --version).
 
         config: %APPDATA%\keepassxc-mcp\config.json on Windows, ~/.config/keepassxc-mcp/config.json on

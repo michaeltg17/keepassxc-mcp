@@ -31,6 +31,14 @@ public sealed record ConfigPaths(string Dir, string ConfigFile)
 {
     public string PendingFile => Path.Combine(Dir, "pending-request.json");
     public string StateFile => Path.Combine(Dir, "state.json");
+    /// <summary>Exposure tracking (SPEC.md E3): paths/UUIDs/origins/fingerprints only —
+    /// never secret values. Disposable by design: deleting it only loses the audit list.</summary>
+    public string ProvenanceFile => Path.Combine(Dir, "provenance.json");
+    // Reader-session file protocol (SPEC.md E1). The reader is a separate terminal process;
+    // commands/results are exchanged through these files, never pipes, never the password.
+    public string ReaderSessionFile => Path.Combine(Dir, "reader-session.json");
+    public string ReaderCommandFile => Path.Combine(Dir, "reader-command.json");
+    public string ReaderResultFile => Path.Combine(Dir, "reader-result.json");
 
     public static ConfigPaths Resolve()
     {
