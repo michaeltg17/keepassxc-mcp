@@ -9,8 +9,15 @@ name: Beta
 #
 # Stable installs are unaffected: install.ps1/install.sh read releases/latest,
 # which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
+#
+# The beta-bootstrap push trigger is registration only (GitHub refuses to run a
+# workflow_dispatch-only file that has never run and is not on the default
+# branch): `git push origin dev:refs/heads/beta-bootstrap` registers it, and the
+# run itself no-ops — every job requires github.event_name == 'workflow_dispatch'.
 on:
   workflow_dispatch:
+  push:
+    branches: [beta-bootstrap]
 
 concurrency:
   group: beta-${{ github.ref }}
@@ -18,6 +25,7 @@ concurrency:
 
 jobs:
   beta-meta:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
