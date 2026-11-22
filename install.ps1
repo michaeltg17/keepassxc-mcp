@@ -39,7 +39,7 @@ if ($prerelease) {
 $tag = $latest.tag_name
 if (-not $tag) { Write-Error 'Could not determine the latest release tag.'; exit 1 }
 
-# Prerelease tags carry +<sha> build metadata; assets are named without it.
+# Some prerelease tags carry +<sha> build metadata; assets are named without it.
 $version = ($tag.TrimStart('v') -split '\+')[0]
 $asset = "keepassxc-mcp-$version-$rid.zip"
 $base = "https://github.com/$repo/releases/download/$tag"

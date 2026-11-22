@@ -47,7 +47,7 @@ else
 fi
 [ -n "$tag" ] || { echo "Could not determine the latest $channel tag." >&2; exit 1; }
 
-# Prerelease tags carry +<sha> build metadata; assets are named without it.
+# Some prerelease tags carry +<sha> build metadata; assets are named without it.
 ver="${tag#v}"; ver="${ver%%+*}"
 asset="keepassxc-mcp-${ver}-$rid.tar.gz"
 base="https://github.com/$REPO/releases/download/$tag"

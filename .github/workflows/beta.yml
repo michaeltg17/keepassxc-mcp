@@ -2,10 +2,10 @@ name: Beta
 
 # On-demand pre-release builds for verification before a real release:
 # Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
-# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N+<short-sha>
-# (N auto-increments; the metadata names the exact commit, which the release
-# targets anyway). It NEVER touches the csproj — beta versions are command-line
-# build inputs, and <Version> still marks real releases only (AGENTS.md).
+# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N (N
+# auto-increments; the Release itself always points at the exact commit, so the
+# tag does not repeat it). It NEVER touches the csproj — beta versions are
+# command-line build inputs, and <Version> still marks real releases only (AGENTS.md).
 #
 # Stable installs are unaffected: install.ps1/install.sh read releases/latest,
 # which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
@@ -58,8 +58,8 @@ jobs:
               | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
           N=$(( ${N:-0} + 1 ))
           echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${BASE}-beta.${N}+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          echo "beta **v${BASE}-beta.${N}+${GITHUB_SHA::7}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          echo "tag=v${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
+          echo "beta **v${BASE}-beta.${N}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
 
   beta-assets:
     needs: beta-meta
