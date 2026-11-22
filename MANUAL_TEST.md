@@ -89,6 +89,9 @@ conversation or in any tool output** — you verify that with your own eyes in t
    real value appears nowhere. `status` shows `reader session : OPEN (pid …)`.
 6. `vault_reader_close` → `status` shows `reader session : none`. Also test the human
    path once: run `keepassxc-mcp reader` yourself in a real terminal, close with Ctrl+C.
+   (Ctrl+C must be tested in a REAL terminal: embedded terminals — agent panes, xterm/
+   conpty hosts — may not deliver the interrupt to the app at all; that is the host,
+   not the reader. Seen in the 0.3.0 beta drill.)
 7. End the task the way the tool contract demands: `vault_audit`, and confirm you would
    surface anything flagged. Then `keepassxc-mcp status`: provenance summary consistent
    with the audit (tracked = 3, exposed = 0 after the rotate).

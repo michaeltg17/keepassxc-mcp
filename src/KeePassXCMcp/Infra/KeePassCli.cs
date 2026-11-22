@@ -141,6 +141,11 @@ public sealed class KeePassCli(string exePath)
     public Task<CliResult> AddEntryAsync(string dbPath, string password, string? keyfilePath, string entryPath, string notes, CancellationToken ct = default)
         => RunAsync(WithKeyfile(["add", "-q"], keyfilePath).Concat([dbPath, entryPath, "--notes", notes]).ToList(), [password], ct);
 
+    /// <summary>`rm -q` — moves an entry to the database's Recycle Bin (KeePass semantics;
+    /// rm on an entry already IN the bin deletes it for good). Password via stdin.</summary>
+    public Task<CliResult> RemoveEntryAsync(string dbPath, string password, string? keyfilePath, string entryPath, CancellationToken ct = default)
+        => RunAsync(WithKeyfile(["rm", "-q"], keyfilePath).Concat([dbPath, entryPath]).ToList(), [password], ct);
+
     public Task<CliResult> EditNotesAsync(string dbPath, string password, string? keyfilePath, string entryPath, string notes, CancellationToken ct = default)
         => RunCheckedAsync(WithKeyfile(["edit", "-q"], keyfilePath).Concat([dbPath, entryPath, "--notes", notes]).ToList(), [password], ct);
 
@@ -167,13 +172,18 @@ public sealed class KeePassCli(string exePath)
         return args;
     }
 
-    /// <summary>`ls -R -f` — flat recursive listing. Groups end with '/', entries don't.</summary>
+    /// <summary>`ls -R -f` — flat recursive listing. Groups end with '/', entries don't.
+    /// keepassxc-cli prints "[empty]" as a sentinel for empty groups — bare when the whole
+    /// database is empty, prefixed with the group path otherwise ("Some Group/[empty]");
+    /// neither is an entry, both must never leak into the result (0.3.0 beta drill caught
+    /// the prefixed variant being parsed as an entry).</summary>
     public async Task<IReadOnlyList<string>> ListEntryPathsAsync(string dbPath, string password, string? keyfilePath, CancellationToken ct = default)
     {
         var result = await RunCheckedAsync(WithKeyfile(["ls", "-q", "-R", "-f"], keyfilePath).Concat([dbPath]).ToList(), [password], ct);
         return result.StdOut
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(line => !line.EndsWith('/') && line != "[empty]") // "[empty]" is keepassxc-cli's sentinel for empty groups
+            .Where(line => !line.EndsWith('/')
+                           && line[(line.LastIndexOf('/') + 1)..] != "[empty]")
             .ToList();
     }
 

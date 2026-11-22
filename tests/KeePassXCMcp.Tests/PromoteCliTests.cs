@@ -65,6 +65,33 @@ public class PromoteCliTests
     }
 
     [RequiresCliFact]
+    public async Task RecycledStagedEntries_AreNeitherListedNorPromoted()
+    {
+        // A human tidying staging uses `keepassxc-cli rm`, which parks entries in the
+        // Recycle Bin. Parked entries are not staged content: they must not appear in
+        // listings or promotion requests, and must never reach the main vault
+        // (0.3.0 beta drill: they were listed, requested, and failed merge verification).
+        using var h = await VaultHarness.CreateAsync();
+        await h.StageAsync("Inbox", "Keeper", "survives");
+        await h.StageAsync("Inbox", "Undone", "deleted before promote");
+        Assert.Equal(2, (await h.StagedEntryPathsAsync()).Count);
+
+        var rm = await h.Cli.RemoveEntryAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Inbox/Undone");
+        Assert.True(rm.Success, rm.FailureSummary);
+
+        var listed = await h.StagedEntryPathsAsync();
+        Assert.Equal(["Inbox/Keeper"], listed); // no Recycle Bin entries, no "[empty]" sentinels
+
+        var request = await h.RecordPromotionRequestAsync();
+        Assert.Equal("Inbox/Keeper", Assert.Single(request.Entries).Path);
+
+        var (exit, _, stderr) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
+        Assert.Equal(Promoter.Exit.Ok, exit);
+        Assert.True(await h.MainHasEntryAsync("Inbox/Keeper"));
+        Assert.False(await h.MainHasEntryAsync("Inbox/Undone")); // parked entry never merges
+    }
+
+    [RequiresCliFact]
     public async Task Approve_WithKeyfileVault()
     {
         using var h = await VaultHarness.CreateAsync(mainWithKeyfile: true);
