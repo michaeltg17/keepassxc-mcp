@@ -7,6 +7,10 @@
 # It does NOT install keepassxc-cli - that is KeePassXC's own binary and this
 # tool refuses to run without it (see the wiki: Setup-and-Use).
 #
+# Pre-releases (beta verification builds) are NOT installed by default - the
+# "latest" endpoint excludes them. To install the newest beta on purpose:
+#   $env:KEEPASSXC_MCP_PRERELEASE = '1'; irm https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.ps1 | iex
+#
 # Usage:  irm https://raw.githubusercontent.com/michaeltg17/keepassxc-mcp/main/install.ps1 | iex
 #     or: .\install.ps1        (from a clone)
 $ErrorActionPreference = 'Stop'
@@ -25,16 +29,23 @@ $rid = switch (${env:PROCESSOR_ARCHITECTURE}) {
     default { Write-Error "Unsupported CPU: $env:PROCESSOR_ARCHITECTURE"; exit 1 }
 }
 
-$latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+$prerelease = $env:KEEPASSXC_MCP_PRERELEASE -eq '1'
+if ($prerelease) {
+    $latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=30" |
+        Where-Object { $_.prerelease -and -not $_.draft } | Select-Object -First 1
+} else {
+    $latest = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest"
+}
 $tag = $latest.tag_name
 if (-not $tag) { Write-Error 'Could not determine the latest release tag.'; exit 1 }
 
-$version = $tag.TrimStart('v')
+# Prerelease tags carry +<sha> build metadata; assets are named without it.
+$version = ($tag.TrimStart('v') -split '\+')[0]
 $asset = "keepassxc-mcp-$version-$rid.zip"
 $base = "https://github.com/$repo/releases/download/$tag"
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "keepassxc-mcp-install-$([guid]::NewGuid())")
 try {
-    Write-Host "Latest release: $tag"
+    if ($prerelease) { Write-Host "Latest PRERELEASE: $tag" } else { Write-Host "Latest release: $tag" }
     try {
         Invoke-WebRequest "$base/$asset" -OutFile (Join-Path $tmp $asset)
     } catch {

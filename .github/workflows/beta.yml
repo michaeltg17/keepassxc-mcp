@@ -1,0 +1,136 @@
+name: Beta
+
+# On-demand pre-release builds for verification before a real release:
+# Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
+# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N+<short-sha>
+# (N auto-increments; the metadata names the exact commit, which the release
+# targets anyway). It NEVER touches the csproj — beta versions are command-line
+# build inputs, and <Version> still marks real releases only (AGENTS.md).
+#
+# Stable installs are unaffected: install.ps1/install.sh read releases/latest,
+# which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: false   # never kill a half-published release
+
+jobs:
+  beta-meta:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse to beta an untested or failed commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CONCLUSIONS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name | startswith("test")) | .conclusion] // [] | .[]')
+          if [ -z "$CONCLUSIONS" ]; then
+            echo "::error::No CI test results for ${GITHUB_SHA} yet — let the CI run on this commit finish first."
+            exit 1
+          fi
+          if echo "$CONCLUSIONS" | grep -vqx success; then
+            echo "::error::CI is not green on this commit — not publishing a beta from it."
+            exit 1
+          fi
+
+      - name: Compute beta version
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BASE=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassXCMcp/KeePassXCMcp.csproj)
+          N=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate --jq '.[].name' \
+              | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
+          N=$(( ${N:-0} + 1 ))
+          echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${BASE}-beta.${N}+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "beta **v${BASE}-beta.${N}+${GITHUB_SHA::7}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+
+  beta-assets:
+    needs: beta-meta
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64, linux-x64, linux-arm64, osx-x64, osx-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            11.0.x
+
+      # Same build recipe as the release job — beta must be the real artifact.
+      # The version override is the ONLY difference.
+      - name: Publish (${{ matrix.rid }})
+        run: |
+          dotnet publish src/KeePassXCMcp/KeePassXCMcp.csproj \
+            -c Release -r ${{ matrix.rid }} --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:DebugType=none -p:DebugSymbols=false \
+            -p:Version=${{ needs.beta-meta.outputs.version }} \
+            -o out/${{ matrix.rid }}
+
+      - name: Archive (${{ matrix.rid }})
+        run: |
+          V=${{ needs.beta-meta.outputs.version }}
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ matrix.rid }}.zip keepassxc-mcp.exe)
+          else
+            tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beta-asset-${{ matrix.rid }}
+          path: keepassxc-mcp-*
+          if-no-files-found: error
+
+  beta-publish:
+    needs: [beta-meta, beta-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: beta-asset-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum keepassxc-mcp-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.beta-meta.outputs.tag }}
+          VERSION: ${{ needs.beta-meta.outputs.version }}
+        run: |
+          cat > NOTES.md <<EOF
+          **Pre-release for verification — not a release.** Built from \`${GITHUB_REF_NAME}@${GITHUB_SHA}\`.
+          Self-contained single-file builds; the external **keepassxc-cli** (KeePassXC >= 2.7.x) is still required.
+
+            KEEPASSXC_MCP_PRERELEASE=1   # then run install.ps1 / install.sh as usual
+
+          The default install commands (without that opt-in) keep installing the latest STABLE release.
+          EOF
+          gh release create "$TAG" \
+            dist/* \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "$TAG" \
+            --notes-file NOTES.md
