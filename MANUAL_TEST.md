@@ -19,7 +19,10 @@ proof of WHICH binary you are testing.
    Confirm it is the release under test: `keepassxc-mcp version`, and `status` shows
    `app version` + a reachable `keepassxc-cli`. (For pre-release verification, install a
    Beta first: `KEEPASSXC_MCP_PRERELEASE=1` before the installer; `version` then reports
-   `0.3.0-beta.N` and the prerelease page names the exact target commit.)
+   `0.3.0-beta.N` and the prerelease page names the exact target commit.
+   On Windows the installer only needs the `keepassxc-mcp` process stopped: disabling the
+   MCP server in the agent's settings is enough (no need to close the agent); re-enabling
+   it starts the new binary.)
 2. Agent side: the MCP server connected to that same binary (check with
    `vault_list_staged` — it must answer).
 3. Pick a marker name for the test entry, e.g. `ManualTest-<version>` — its notes must say

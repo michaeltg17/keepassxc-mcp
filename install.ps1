@@ -19,7 +19,7 @@ $repo = 'michaeltg17/keepassxc-mcp'
 $dir = Join-Path $env:LOCALAPPDATA 'Programs\keepassxc-mcp'
 
 if (Get-Process -Name 'keepassxc-mcp' -ErrorAction SilentlyContinue) {
-    Write-Error 'keepassxc-mcp is running (an MCP host holds the exe). Close your agent/OpenCode first, then re-run this installer.'
+    Write-Error 'keepassxc-mcp is running (an MCP host holds the exe). Stop just that server — e.g. disable the keepassxc MCP server in your agent settings (fully closing the agent also works) — then re-run this installer.'
     exit 1
 }
 
