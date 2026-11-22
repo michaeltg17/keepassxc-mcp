@@ -5,7 +5,9 @@ vaults — never the user's real one, and never a real human typing a real passw
 real terminal window. This drill covers exactly that residue. Run it:
 
 - after each release (PR merged, release published) and after updating the installed binary;
-- whenever `promote`, the merge/verification flow, or the approver-window launcher changes.
+- whenever `promote`, the merge/verification flow, or the approver-window launcher changes;
+- whenever the `reader` mode, its file protocol, the provenance sidecar, or the
+  generate/stage/rotate flows change (Part B below).
 
 Rules that hold throughout: the main vault password is typed only by the human, only into
 the window — never shown here, never in any tool the agent uses. The window banner is the
@@ -22,7 +24,7 @@ proof of WHICH binary you are testing.
    it is a test entry, safe to delete. Pick a small file with NO secret in it as the
    attachment, and precompute its hash: `Get-FileHash -Algorithm SHA256 <file>`.
 
-## The drill
+## Part A — the promote flow drill
 
 1. `vault_stage_entry` the marker entry + attachment → the receipt's sha256/size must
    match the precomputed hash.
@@ -60,6 +62,45 @@ proof of WHICH binary you are testing.
 | `n` at the confirm prompt | `Denied.`, exit 2, nothing changed |
 | Ctrl+C in the window | `Aborted (Ctrl+C).`, exit 130, nothing changed |
 | delete the pending request, rerun promote | refuses with "No pending promotion request", exit 1 |
+
+## Part B — the secret-flow drill (reader, generate, ingest, audit)
+
+Run this instead of/in addition to Part A when the reader or secret flows changed.
+The whole part is about one fact: **no secret value ever appears in the agent's
+conversation or in any tool output** — you verify that with your own eyes in the vault GUI.
+
+1. `vault_generate` a marker secret, e.g. `ManualTest-<version>-gen` (length 20).
+   Receipt shows path/UUID/fingerprint/length — and no value. `keepassxc-mcp audit`
+   (or `vault_audit`) shows it as `generated`, exposed: 0.
+2. Piped ingest: `'piped-test-value' | keepassxc-mcp stage --label ManualTest-<version>-piped`.
+   The value must never appear in the command's output. Audit shows it as `piped`.
+3. `vault_stage_value` with an obvious throwaway value → tagged `seen-by-model`;
+   `vault_audit` now flags it `<-- ROTATE or dismiss`. Then `vault_rotate` that entry →
+   audit is clean again (old fingerprint retired). Open the vault GUI: the entries exist
+   with real passwords you never saw.
+4. Ask the human for consent, then `vault_reader_open` → a reader window opens.
+   **Verify the banner** (path/version/sha256 = the installed binary, same as Part A step 4).
+   In the window: Enter → **a wrong password on purpose** → `Attempt failed`, re-prompt
+   `attempt 2/3` → the real password → `Reader session open`.
+5. `vault_search <term>` → entry PATHS only. `vault_get` on the marker entry → title/
+   username/URL/UUID/notes and `Provenance:` — the password line is `PROTECTED`, and the
+   real value appears nowhere. `status` shows `reader session : OPEN (pid …)`.
+6. `vault_reader_close` → `status` shows `reader session : none`. Also test the human
+   path once: run `keepassxc-mcp reader` yourself in a real terminal, close with Ctrl+C.
+7. End the task the way the tool contract demands: `vault_audit`, and confirm you would
+   surface anything flagged. Then `keepassxc-mcp status`: provenance summary consistent
+   with the audit (tracked = 3, exposed = 0 after the rotate).
+
+Part B checklist:
+
+- [ ] reader banner path/version/sha256 = the installed release binary
+- [ ] wrong password in the reader window consumed an attempt, opened nothing
+- [ ] no secret VALUE appeared in any tool result, window output, or `status`
+- [ ] `vault_generate` + rotate kept provenance straight (generated/piped/seen-by-model,
+      rotate clears exposure)
+- [ ] reader closes by request, by Ctrl+C, and disappears from `status`
+- [ ] clean up: remove the three `ManualTest-…-gen/piped/…` entries from staging before
+      promoting anything for real (or promote one on purpose and delete it in the GUI)
 
 ## Leave-behinds
 
