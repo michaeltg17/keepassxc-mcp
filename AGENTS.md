@@ -14,6 +14,12 @@ Read before making changes in this repo.
 - After each release and after updating the installed binary, run the real-vault manual
   verification in `MANUAL_TEST.md` — the automated suite never touches a real vault or a
   real human at a password prompt; that drill does.
+- Pre-release verification without touching the release machinery: run the **Beta**
+  workflow (Actions → Run workflow, or `gh workflow run beta.yml --ref dev`). It publishes a
+  GitHub *prerelease* `v<csproj-version>-beta.N` built from that exact ref (N
+  auto-increments, CI must be green on the commit). It never bumps the csproj — beta
+  versions are command-line build inputs only. `releases/latest` skips prereleases, so
+  normal installs are unaffected; opt in with `KEEPASSXC_MCP_PRERELEASE=1` in the installer.
 
 ## PR description format (this becomes the release notes)
 

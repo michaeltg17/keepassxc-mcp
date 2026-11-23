@@ -14,62 +14,68 @@ public static class ApproverLauncher
 {
     public sealed record LaunchResult(bool Launched, string Method, string Detail);
 
-    public static LaunchResult TryOpenPromoteWindow()
+    public static LaunchResult TryOpenPromoteWindow() => TryOpenWindow("promote");
+
+    /// <summary>Reader window (SPEC.md E1). The only argument is the server pid — a plain
+    /// integer for the orphan guard, never data, never a secret.</summary>
+    public static LaunchResult TryOpenReaderWindow(int serverPid) => TryOpenWindow($"reader --server {serverPid}");
+
+    private static LaunchResult TryOpenWindow(string args)
     {
         var exe = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
-            return Manual("could not determine this executable's own path");
+            return Manual(args, "could not determine this executable's own path");
 
         try
         {
             if (OperatingSystem.IsWindows())
-                return OpenWindows(exe);
+                return OpenWindows(exe, args);
             if (OperatingSystem.IsMacOS())
-                return OpenMacOS(exe);
-            return OpenLinux(exe);
+                return OpenMacOS(exe, args);
+            return OpenLinux(exe, args);
         }
         catch (Exception ex)
         {
-            return Manual(ex.Message);
+            return Manual(args, ex.Message);
         }
     }
 
-    private static LaunchResult OpenWindows(string exe)
+    private static LaunchResult OpenWindows(string exe, string args)
     {
-        if (exe.Contains('"')) return Manual($"executable path contains a quote: {exe}");
-        // cmd /k keeps the window open after promote exits so the outcome/exit code stays
+        if (exe.Contains('"')) return Manual(args, $"executable path contains a quote: {exe}");
+        // cmd /k keeps the window open after the mode exits so the outcome/exit code stays
         // readable. cmd quote-stripping: /k ""<exe>" promote" runs "<exe>" promote.
-        var psi = new ProcessStartInfo("cmd.exe", $"/k \"\"{exe}\" promote\"")
+        var psi = new ProcessStartInfo("cmd.exe", $"/k \"\"{exe}\" {args}\"")
         {
             UseShellExecute = true, // console subsystem app → gets its own visible console window
         };
         Process.Start(psi);
         return new LaunchResult(true, "windows-console",
-            $@"opened a new console window running: ""{exe}"" promote (window stays open afterwards)");
+            $@"opened a new console window running: ""{exe}"" {args} (window stays open afterwards)");
     }
 
-    private static LaunchResult OpenMacOS(string exe)
+    private static LaunchResult OpenMacOS(string exe, string args)
     {
-        if (exe.Contains('"')) return Manual($"executable path contains a quote: {exe}");
+        if (exe.Contains('"')) return Manual(args, $"executable path contains a quote: {exe}");
         var psi = new ProcessStartInfo("/usr/bin/osascript") { UseShellExecute = false };
         psi.ArgumentList.Add("-e");
-        psi.ArgumentList.Add($"tell application \"Terminal\" to do script \"\\\"{exe}\\\" promote\"");
+        psi.ArgumentList.Add($"tell application \"Terminal\" to do script \"\\\"{exe}\\\" {args}\"");
         psi.ArgumentList.Add("-e");
         psi.ArgumentList.Add("tell application \"Terminal\" to activate");
         Process.Start(psi);
         return new LaunchResult(true, "macos-Terminal",
-            $"asked Terminal.app to run: \"{exe}\" promote (its window stays open afterwards)");
+            $"asked Terminal.app to run: \"{exe}\" {args} (its window stays open afterwards)");
     }
 
-    private static LaunchResult OpenLinux(string exe)
+    private static LaunchResult OpenLinux(string exe, string args)
     {
-        if (exe.Contains('\'')) return Manual($"executable path contains a single quote: {exe}");
+        if (exe.Contains('\'')) return Manual(args, $"executable path contains a single quote: {exe}");
         if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")) &&
             string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY")))
-            return Manual("no DISPLAY/WAYLAND_DISPLAY — this looks like a headless session");
+            return Manual(args, "no DISPLAY/WAYLAND_DISPLAY — this looks like a headless session");
 
-        // sh keeps the window useful after promote exits (result stays on screen until Enter).
-        var shCmd = $"'{exe}' promote; printf '\\n[approver finished — press Enter to close this window]\\n'; read _";
+        // sh keeps the window useful after the command exits (result stays on screen until Enter).
+        var shCmd = $"'{exe}' {args}; printf '\\n[keepassxc-mcp finished — press Enter to close this window]\\n'; read _";
         var candidates = new (string Bin, string[] Prefix)[]
         {
             ("gnome-terminal", ["--"]),
@@ -90,14 +96,14 @@ public static class ApproverLauncher
             try
             {
                 Process.Start(psi);
-                return new LaunchResult(true, $"linux-{bin}", $"opened a terminal window running: {exe} promote");
+                return new LaunchResult(true, $"linux-{bin}", $"opened a terminal window running: {exe} {args}");
             }
             catch (Exception)
             {
                 // candidate exists but refused to start — try the next one.
             }
         }
-        return Manual("no known terminal emulator (gnome-terminal/konsole/mate-terminal/x-terminal-emulator/xterm) is installed");
+        return Manual(args, "no known terminal emulator (gnome-terminal/konsole/mate-terminal/x-terminal-emulator/xterm) is installed");
     }
 
     private static string? FindOnPath(string name)
@@ -115,6 +121,6 @@ public static class ApproverLauncher
         return null;
     }
 
-    private static LaunchResult Manual(string reason) =>
-        new(false, "none", $"{reason} — run \"keepassxc-mcp promote\" in your own terminal instead.");
+    private static LaunchResult Manual(string args, string reason) =>
+        new(false, "none", $"{reason} — run \"keepassxc-mcp {args}\" in your own terminal instead.");
 }

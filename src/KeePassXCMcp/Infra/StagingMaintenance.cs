@@ -19,6 +19,21 @@ public sealed class StagingMaintenance(KeePassCli cli, VaultConfig cfg)
         await EnsureStagingAsync(ct);
     }
 
-    public Task<IReadOnlyList<string>> ListEntryPathsAsync(CancellationToken ct = default)
-        => cli.ListEntryPathsAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, ct);
+    /// <summary>Staged content = every entry EXCEPT the Recycle Bin's. keepassxc-cli's `rm`
+    /// parks deleted entries there (a human tidying staging does exactly that), and a parked
+    /// entry is by definition NOT staged: listing it would put it in the promotion request,
+    /// where the merge never brings it across and post-merge verification fails on it
+    /// (0.3.0 beta drill).</summary>
+    public async Task<IReadOnlyList<string>> ListEntryPathsAsync(CancellationToken ct = default)
+    {
+        var all = await cli.ListEntryPathsAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, ct);
+        return all.Where(p => !IsRecycled(p)).ToList();
+    }
+
+    private static bool IsRecycled(string path) =>
+        path.StartsWith(RecycleBinGroupName + "/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>kdbx identifies the recycle bin by group UUID; keepassxc-cli's listing only
+    /// exposes its default name, which is what any `rm` creates.</summary>
+    public const string RecycleBinGroupName = "Recycle Bin";
 }

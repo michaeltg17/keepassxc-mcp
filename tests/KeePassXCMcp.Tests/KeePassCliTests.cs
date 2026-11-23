@@ -91,6 +91,24 @@ public class KeePassCliTests
         Assert.NotNull(ls);
     }
 
+    [RequiresCliFact]
+    public async Task ListEntryPaths_SkipsEmptyGroupSentinels()
+    {
+        // keepassxc-cli marks empty groups with a "[empty]" line (bare for a wholly empty
+        // db, prefixed "Group/[empty]" otherwise). Neither is an entry. Regression: 0.3.0
+        // beta parsed "Recycle Bin/[empty]" as a staged entry.
+        using var h = await VaultHarness.CreateAsync();
+        await h.Cli.EnsureGroupAsync(h.MainPath, VaultHarness.MainPassword, null, "Keep");
+        var add = await h.Cli.AddEntryAsync(h.MainPath, VaultHarness.MainPassword, null, "Keep/Me", "note");
+        Assert.True(add.Success, add.FailureSummary);
+        await h.Cli.EnsureGroupAsync(h.MainPath, VaultHarness.MainPassword, null, "EmptyGroup");
+
+        var paths = await h.Cli.ListEntryPathsAsync(h.MainPath, VaultHarness.MainPassword, null);
+
+        Assert.Contains("Keep/Me", paths);
+        Assert.DoesNotContain(paths, p => p.Contains("[empty]"));
+    }
+
     [Fact]
     public void ShowParser_ParsesMultiLineNotesAndAttachments()
     {
