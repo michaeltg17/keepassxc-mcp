@@ -199,4 +199,57 @@ public class PromoteCliTests
         var (_, _, stderr) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
         Assert.Contains("WARNING: main vault file changed", stderr);
     }
+
+    [RequiresCliFact]
+    public async Task VerificationFailure_WhenStagingChangedAfterRequest_KeepsEverything()
+    {
+        // The request promises "promote Inbox/Vanishing", but between vault_promote and
+        // the approval someone removes the staged entry directly (keepassxc-cli rm ->
+        // parked in the Recycle Bin). The merge delivers nothing; post-merge verification
+        // must catch it and keep staging + request exactly as they are.
+        using var h = await VaultHarness.CreateAsync();
+        await h.StageAsync("Inbox", "Vanishing", "body");
+        await h.RecordPromotionRequestAsync();
+
+        var rm = await h.Cli.RemoveEntryAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Inbox/Vanishing");
+        Assert.True(rm.Success, rm.FailureSummary);
+
+        var (exit, _, stderr) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
+
+        Assert.Equal(Promoter.Exit.Error, exit);
+        Assert.Contains("verification FAILED", stderr);
+        Assert.Contains("entry not found after merge: Inbox/Vanishing", stderr);
+        Assert.Contains("Staging was NOT flushed", stderr);
+        Assert.False(await h.MainHasEntryAsync("Inbox/Vanishing"));
+        Assert.NotNull(PendingRequest.TryLoad(h.Paths));              // request kept
+        var raw = await h.Cli.ListEntryPathsAsync(h.StagingPath, VaultHarness.StagingPassword, null);
+        Assert.Contains(raw, p => p.Contains("Vanishing"));           // staging kept (entry sits parked)
+    }
+
+    [RequiresCliFact]
+    public async Task SecondPromote_WarnsOnExternalEdits_AndKeepsThem()
+    {
+        // The multi-day case: first promote (no prior state -> the honest note), then the
+        // user edits the main vault outside this flow ("GUI"), then promotes again. The
+        // approver must be warned; the merge must be safe and must preserve the external edit.
+        using var h = await VaultHarness.CreateAsync();
+        await h.StageAsync("Inbox", "First", "original");
+        await h.RecordPromotionRequestAsync();
+        var (exit1, _, stderr1) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
+        Assert.Equal(Promoter.Exit.Ok, exit1);
+        Assert.Contains("no previous promote is recorded", stderr1);
+
+        var edit = await h.Cli.EditNotesAsync(h.MainPath, VaultHarness.MainPassword, null, "Inbox/First", "edited in the GUI after promote");
+        Assert.True(edit.Success, edit.FailureSummary);
+
+        await h.StageAsync("Inbox", "Second", "new content");
+        await h.RecordPromotionRequestAsync();
+        var (exit2, _, stderr2) = await RunPromoteAsync(h, "y", VaultHarness.MainPassword);
+
+        Assert.Contains("main vault file changed since the last promote", stderr2);
+        Assert.Equal(Promoter.Exit.Ok, exit2);
+        var show = ShowParser.Parse(await h.ShowMainAsync("Inbox/First"));
+        Assert.Contains("edited in the GUI after promote", show.Notes);   // external edit survives the merge
+        Assert.True(await h.MainHasEntryAsync("Inbox/Second"));           // and the new content landed
+    }
 }

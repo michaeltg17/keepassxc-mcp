@@ -51,7 +51,8 @@ from that.
 10. **Main-vault reads are label-only.** `vault_search` returns entry paths; `vault_get`
     returns title/username/URL/UUID/notes/attachment names. The password field is never
     printable through this path: keepassxc-cli `show` masks it as `PROTECTED`, and no
-    read tool asks for it. A vault secret value enters model context only through a flow
+    read tool asks for it — see "Field visibility" below for the full contract. A vault
+    secret value enters model context only through a flow
     that marks it as such (`vault_stage_value` tags `seen-by-model`; F5-style reveal is
     not built yet). Generation (`vault_generate`, `keepassxc-mcp generate`) and piped
     ingest (`keepassxc-mcp stage`) put values into staging without ever printing them.
@@ -85,6 +86,30 @@ could pop approval windows unprompted; the human must still type `y` and the pas
 and should verify the identity banner path matches the installed binary before typing.
 Set `"allowAgentApproverWindow": false` to restore strict human-launch mode — then the
 tool refuses and only manual `keepassxc-mcp promote` exists.
+
+## Field visibility: what counts as "the secret"
+
+The kdbx **file** is encrypted as a whole — at rest, every field of every entry is
+protected by the master key. The interesting question is what is visible *once a
+process holding the vault can talk to the agent*, and there our contract is deliberate
+and simple:
+
+> **The entry's password field is the secret.** Everything else about an entry is a
+> label, visible to the agent by design. If you want a value kept from the agent,
+> put it in the password field — anything you write into notes is agent-visible.
+
+| What                                   | At rest (kdbx) | To the agent, through our tools |
+| -------------------------------------- | -------------- | ------------------------------- |
+| Main vault master password             | required to open | **never** — typed at a keyboard into another process (invariant 1) |
+| Entry **password field**               | encrypted | **never** — `show` reports it as `PROTECTED`; no tool requests it; flows that move values (generate/stage/rotate) print only length + fingerprint |
+| Attachment **contents**                | encrypted | **never fetched** — tools handle only name, size and sha256 (integrity receipts). Note: a sha256 of a tiny, guessable file is a commitment; contents stay unseen, but don't attach 20-byte "secret" text files as if they were passwords |
+| Entry paths / groups / titles          | encrypted | visible — these are the labels the design is built to expose |
+| Username, URL, notes                   | encrypted | visible — treat any text you stage or any notes you write as agent-readable |
+| UUIDs, provenance records, pending-request, state | plaintext metadata files | visible by design; they hold paths/hashes/timestamps, never values (invariant 11) |
+
+Staging entries follow the same rule: `vault_list_staged` prints their notes and
+attachment metadata, never the password field. In short: **values in, receipts out —
+the only value that stays invisible is the one in the password field.**
 
 ## What agents CAN do
 
