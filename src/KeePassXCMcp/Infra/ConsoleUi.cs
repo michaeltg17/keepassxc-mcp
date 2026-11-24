@@ -59,6 +59,13 @@ public sealed class ConsoleUi
         // path never gets here — its bytes stay exactly as they have always been.
         try { Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false); }
         catch { /* a console we may not own: glyphs degrade to '?', content is unaffected */ }
+
+        // Windows: legacy conhost prints SGR sequences literally until the app opts the
+        // console into VT processing (Windows Terminal/ConPTY pre-enable it, which hides
+        // the omission in modern hosts). Real console handles only — a redirected handle
+        // simply fails the mode query, so forced-rich on a pipe (the e2e hook) is a no-op.
+        TryEnableVirtualTerminal();
+
         var writer = liveWriter();
 
         // We have decided this is a terminal; tell Spectre not to re-detect a pipe away from us.
@@ -96,6 +103,35 @@ public sealed class ConsoleUi
             catch { /* redirected after all — the width probe just failed */ }
         }
         return 400; // forced rich on a pipe: wide enough that content is never wrapped mid-assert
+    }
+
+    private static void TryEnableVirtualTerminal()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        TryVt(StdOutputHandle);
+        TryVt(StdErrorHandle);
+    }
+
+    private const int StdOutputHandle = -11, StdErrorHandle = -12; // STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+    private const uint EnableVtProcessing = 0x0020;                 // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern nint GetStdHandle(int nStdHandle);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool GetConsoleMode(nint hConsoleHandle, out uint lpMode);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetConsoleMode(nint hConsoleHandle, uint dwMode);
+
+    private static void TryVt(int stdHandle)
+    {
+        try
+        {
+            var h = GetStdHandle(stdHandle);
+            if (h == 0 || h == -1) return;               // no handle / invalid
+            if (!GetConsoleMode(h, out var mode)) return; // not a console (pipe / forced-rich)
+            SetConsoleMode(h, mode | EnableVtProcessing);
+        }
+        catch { /* decoration never breaks a contract */ }
     }
 
     // ---------- content lines ----------
