@@ -33,13 +33,13 @@ public sealed class ConsoleUi
     // The live Console.Out/Error are fetched inside Create: if we decide to render richly
     // we first switch the process to UTF-8 output (box glyphs need real bytes), and .NET
     // hands out a NEW Console.Out after that switch — the plain path never takes it.
-    public static ConsoleUi ForStdout(VaultConfig cfg) => Create(cfg, static () => Console.Out, Console.IsOutputRedirected);
-    public static ConsoleUi ForStderr(VaultConfig cfg) => Create(cfg, static () => Console.Error, Console.IsErrorRedirected);
+    public static ConsoleUi ForStdout(VaultConfig cfg) => Create(cfg, static () => Console.Out, Console.IsOutputRedirected, StdOutputHandle);
+    public static ConsoleUi ForStderr(VaultConfig cfg) => Create(cfg, static () => Console.Error, Console.IsErrorRedirected, StdErrorHandle);
 
     /// <summary>Entry points for when no VaultConfig exists (config errors, the window
     /// launchers, usage): default theme on a real terminal, today's bytes on a pipe.</summary>
-    public static ConsoleUi ForStdoutDefaultTheme() => Create(NoConfig, static () => Console.Out, Console.IsOutputRedirected);
-    public static ConsoleUi ForStderrDefaultTheme() => Create(NoConfig, static () => Console.Error, Console.IsErrorRedirected);
+    public static ConsoleUi ForStdoutDefaultTheme() => Create(NoConfig, static () => Console.Out, Console.IsOutputRedirected, StdOutputHandle);
+    public static ConsoleUi ForStderrDefaultTheme() => Create(NoConfig, static () => Console.Error, Console.IsErrorRedirected, StdErrorHandle);
 
     /// <summary>A config error happens before any config can be trusted — red text on a
     /// terminal, the exact message line elsewhere (never on MCP stdout).</summary>
@@ -47,7 +47,7 @@ public sealed class ConsoleUi
 
     private static readonly VaultConfig NoConfig = new("", null, "", "", "");
 
-    private static ConsoleUi Create(VaultConfig cfg, Func<TextWriter> liveWriter, bool redirected)
+    private static ConsoleUi Create(VaultConfig cfg, Func<TextWriter> liveWriter, bool redirected, int stdHandle)
     {
         var theme = Themes.Resolve(cfg.ConsoleTheme);
         if (!TerminalWantsRich(redirected))
@@ -60,13 +60,20 @@ public sealed class ConsoleUi
         try { Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false); }
         catch { /* a console we may not own: glyphs degrade to '?', content is unaffected */ }
 
-        // Windows: legacy conhost prints SGR sequences literally until the app opts the
-        // console into VT processing (Windows Terminal/ConPTY pre-enable it, which hides
-        // the omission in modern hosts). Real console handles only — a redirected handle
-        // simply fails the mode query, so forced-rich on a pipe (the e2e hook) is a no-op.
+        // Windows: conhost parses SGR sequences only when the output buffer has
+        // ENABLE_VIRTUAL_TERMINAL_PROCESSING (0x0004) — Windows Terminal/ConPTY
+        // pre-enable it, which hid the omission on modern hosts. Real console handles
+        // only: a redirected handle fails the mode query, so forced-rich on a pipe
+        // (the e2e hook) is a no-op.
         TryEnableVirtualTerminal();
 
-        var writer = liveWriter();
+        // And .NET's Console.Out feeds conhost encoded BYTES via WriteFile, which this
+        // conhost stores verbatim — the Part C buffer dump showed real ESC cells and zero
+        // parsing on one line while a WriteConsole write on the next line rendered. The
+        // rich path therefore writes through WriteConsoleW to the real handle: that IS the
+        // parsed path, and it is glyph-correct with no codepage involvement at all.
+        // Non-console handles (pipes, CI, forced-rich e2e) keep plain Console.Out bytes.
+        var writer = RichWriter(liveWriter, stdHandle);
 
         // We have decided this is a terminal; tell Spectre not to re-detect a pipe away from us.
         var settings = new AnsiConsoleSettings
@@ -113,7 +120,58 @@ public sealed class ConsoleUi
     }
 
     private const int StdOutputHandle = -11, StdErrorHandle = -12; // STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
-    private const uint EnableVtProcessing = 0x0020;                 // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+    // The OUTPUT-console flag is 0x0004. 0x0020 is an INPUT-only value that makes
+    // SetConsoleMode reject the call outright (ERROR_INVALID_PARAMETER), and 0x0010 is
+    // a valid-but-unrelated output flag — both shipped as bugs through the beta.1/beta.2
+    // Part C drill before the console-buffer dump settled the mechanism.
+    private const uint EnableVtProcessing = 0x0004;                 // ENABLE_VIRTUAL_TERMINAL_PROCESSING
+
+    /// <summary>The rich writer for a real Windows console: strings go to the handle via
+    /// WriteConsoleW — the input path conhost actually runs its VT parser on. Anything
+    /// that is not a console handle (pipe, CI, forced-rich e2e) uses the live
+    /// Console.Out/Error unchanged, so no machine-consumed byte ever changes.</summary>
+    private static TextWriter RichWriter(Func<TextWriter> fallback, int stdHandle)
+    {
+        if (!OperatingSystem.IsWindows()) return fallback();
+        var h = GetStdHandle(stdHandle);
+        if (h == 0 || h == -1 || !GetConsoleMode(h, out _)) return fallback();
+        return new DirectConsoleWriter(h, fallback());
+    }
+
+    private sealed class DirectConsoleWriter : TextWriter
+    {
+        private readonly nint _handle;
+        private readonly TextWriter _fallback;
+
+        internal DirectConsoleWriter(nint handle, TextWriter fallback)
+        {
+            _handle = handle;
+            _fallback = fallback;
+        }
+
+        public override System.Text.Encoding Encoding => new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+        public override void Write(char value) => WriteString(value.ToString());
+        public override void Write(string? value) => WriteString(value);
+        public override void WriteLine() => WriteString(NewLine);
+        public override void WriteLine(string? value) => WriteString(value + NewLine);
+        public override void Flush() { /* every write lands immediately */ }
+
+        private void WriteString(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            try
+            {
+                if (WriteConsoleW(_handle, s, (uint)s.Length, out _, IntPtr.Zero)) return;
+            }
+            catch { /* fall through to the ordinary stream */ }
+            _fallback.Write(s); // content must never be lost — decoration is allowed to degrade
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern bool WriteConsoleW(nint hConsoleOutput, string lpBuffer,
+            uint nNumberOfCharsToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+    }
 
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern nint GetStdHandle(int nStdHandle);
