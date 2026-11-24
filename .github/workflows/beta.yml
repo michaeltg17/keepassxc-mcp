@@ -71,38 +71,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v6
+      # The shared build recipe (same action the release job uses) — the version
+      # override is the only difference.
+      - uses: ./.github/actions/build-asset
         with:
-          dotnet-version: |
-            11.0.x
-
-      # Same build recipe as the release job — beta must be the real artifact.
-      # The version override is the ONLY difference.
-      - name: Publish (${{ matrix.rid }})
-        run: |
-          dotnet publish src/KeePassXCMcp/KeePassXCMcp.csproj \
-            -c Release -r ${{ matrix.rid }} --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none -p:DebugSymbols=false \
-            -p:Version=${{ needs.beta-meta.outputs.version }} \
-            -o out/${{ matrix.rid }}
-
-      - name: Archive (${{ matrix.rid }})
-        run: |
-          V=${{ needs.beta-meta.outputs.version }}
-          if [[ "${{ matrix.rid }}" == win-* ]]; then
-            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ matrix.rid }}.zip keepassxc-mcp.exe)
-          else
-            tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: beta-asset-${{ matrix.rid }}
-          path: keepassxc-mcp-*
-          if-no-files-found: error
+          rid: ${{ matrix.rid }}
+          version: ${{ needs.beta-meta.outputs.version }}
+          artifact-prefix: beta-asset
 
   beta-publish:
     needs: [beta-meta, beta-assets]

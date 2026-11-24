@@ -1,0 +1,61 @@
+name: build-asset
+description: >
+  The shared build recipe: publish a self-contained single-file asset for one rid and
+  upload it as workflow artifact. The release and beta jobs must build identical bytes —
+  this action is the single definition of "how an asset is built" (copy-drift here means
+  beta no longer verifies what ships).
+inputs:
+  rid:
+    description: Target rid (win-x64, linux-arm64, …).
+    required: true
+  version:
+    description: >
+      Version override for the build. Empty = use the csproj <Version> (the release
+      path); beta passes v<base>-beta.N.
+    required: false
+    default: ''
+  artifact-prefix:
+    description: Prefix of the uploaded artifact name (<prefix>-<rid>). Release keeps the
+      default; beta passes beta-asset so the download pattern stays separated.
+    required: false
+    default: asset
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: |
+          11.0.x
+
+    # Self-contained single file so users need no .NET install. NOT trimmed: the
+    # ModelContextProtocol SDK relies on reflection (DI + tool discovery).
+    - name: Publish (${{ inputs.rid }})
+      shell: bash
+      run: |
+        dotnet publish src/KeePassXCMcp/KeePassXCMcp.csproj \
+          -c Release -r ${{ inputs.rid }} --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:IncludeNativeLibrariesForSelfExtract=true \
+          -p:EnableCompressionInSingleFile=true \
+          -p:DebugType=none -p:DebugSymbols=false \
+          ${{ inputs.version && format('-p:Version={0}', inputs.version) || '' }} \
+          -o out/${{ inputs.rid }}
+
+    - name: Archive (${{ inputs.rid }})
+      shell: bash
+      run: |
+        V="${{ inputs.version }}"
+        if [ -z "$V" ]; then
+          V=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassXCMcp/KeePassXCMcp.csproj)
+        fi
+        if [[ "${{ inputs.rid }}" == win-* ]]; then
+          (cd out/${{ inputs.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ inputs.rid }}.zip keepassxc-mcp.exe)
+        else
+          tar -czf keepassxc-mcp-$V-${{ inputs.rid }}.tar.gz -C out/${{ inputs.rid }} keepassxc-mcp
+        fi
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-prefix }}-${{ inputs.rid }}
+        path: keepassxc-mcp-*
+        if-no-files-found: error

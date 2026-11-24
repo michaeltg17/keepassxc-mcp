@@ -107,37 +107,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v6
+      # The build recipe lives in one place (.github/actions/build-asset) — shared
+      # with the beta workflow, so a beta always verifies the bytes that ship.
+      - uses: ./.github/actions/build-asset
         with:
-          dotnet-version: |
-            11.0.x
-
-      # Self-contained single file so users need no .NET install. NOT trimmed: the
-      # ModelContextProtocol SDK relies on reflection (DI + tool discovery).
-      - name: Publish (${{ matrix.rid }})
-        run: |
-          dotnet publish src/KeePassXCMcp/KeePassXCMcp.csproj \
-            -c Release -r ${{ matrix.rid }} --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none -p:DebugSymbols=false \
-            -o out/${{ matrix.rid }}
-
-      - name: Archive (${{ matrix.rid }})
-        run: |
-          V=${{ needs.release-check.outputs.version }}
-          if [[ "${{ matrix.rid }}" == win-* ]]; then
-            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ matrix.rid }}.zip keepassxc-mcp.exe)
-          else
-            tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: asset-${{ matrix.rid }}
-          path: keepassxc-mcp-*
-          if-no-files-found: error
+          rid: ${{ matrix.rid }}
 
   publish:
     needs: [test, release-check, build-assets]
