@@ -3,16 +3,19 @@ name: Beta
 # On-demand pre-release builds for verification before a real release:
 # Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
 # Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N. The number is
-# RESERVED FIRST: beta-meta creates a DRAFT release before anything builds, so
-# every asset is built carrying EXACTLY the tag's version — the two can never
-# disagree. GitHub reserves a deleted release's tag name forever ("immutable
-# release") while /tags hides it, so the draft creation itself is the authority
-# on what's free: on that 422 the next number is taken (bounded retry).
-# The Release always points at the exact commit; the final job only uploads
-# assets and un-drafts. It NEVER touches the csproj — beta versions are
+# RESERVED FIRST: beta-meta creates the (assetless) prerelease BEFORE anything
+# builds, so every asset is built carrying EXACTLY the tag's version — the two
+# can never disagree. Creating a PUBLISHED release is also the authoritative
+# check for what's free: GitHub reserves a deleted release's tag name forever
+# ("immutable release") while /tags hides it, so on that 422 the next number
+# is taken (bounded retry). Drafts can't reserve anything — GitHub defers tag
+# creation and name validation to publish, so a draft falsely "succeeds" on a
+# burned name. The Release always points at the exact commit; the final job
+# only uploads assets. It NEVER touches the csproj — beta versions are
 # command-line build inputs, and <Version> still marks real releases only (AGENTS.md).
-# A FAILED run leaves its DRAFT in place (private, its tag keeps the number out
-# of later runs' way); delete such drafts by hand if desired.
+# A FAILED run leaves an assetless prerelease (its tag is listed, so later
+# runs' numbers naturally step past it); delete it by hand — the name stays
+# burned either way, and the reserve loop skips burned names.
 #
 # Beta-tag deletion policy: never delete a beta tag of the CURRENT or NEXT
 # release — deleting burns the name forever and later runs must skip it. Only
@@ -62,7 +65,7 @@ jobs:
             exit 1
           fi
 
-      - name: Reserve beta number (draft release, before any build)
+      - name: Reserve beta number (create the assetless prerelease, before any build)
         id: meta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,10 +79,11 @@ jobs:
 
           The default install commands (without that opt-in) keep installing the latest STABLE release.
           EOF
-          # Starting candidate from live tags (a draft's tag is listed too, so a
-          # prior failed run's number is already out of the way). Numbers burned
-          # by DELETED releases are invisible here but stay reserved — the draft
-          # creation is the authority: on that 422 take the next number.
+          # Starting candidate from live tags (a published prerelease's tag IS
+          # listed, so a prior failed run's number is already out of the way).
+          # Numbers burned by DELETED releases are invisible here but stay
+          # reserved, and only creating a PUBLISHED release validates a name —
+          # so the create itself is the probe: on a burned name take the next.
           N=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate --jq '.[].name' \
               | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
           N=$(( ${N:-0} + 1 ))
@@ -87,17 +91,17 @@ jobs:
           for _ in $(seq 1 15); do
             TAG="v${BASE}-beta.${N}"
             if gh release create "$TAG" \
-              --draft --prerelease \
+              --prerelease \
               --target "${GITHUB_SHA}" \
               --title "$TAG" \
               --notes-file NOTES.md 2>"$ERR"; then
               echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
               echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-              echo "reserved draft **${TAG}** at ${GITHUB_SHA} — every asset builds as ${BASE}-beta.${N}" >> "$GITHUB_STEP_SUMMARY"
+              echo "reserved **${TAG}** (assetless) at ${GITHUB_SHA} — every asset builds as ${BASE}-beta.${N}" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            if grep -qi "immutable release" "$ERR"; then
-              echo "tag ${TAG} is reserved by a deleted release — taking the next number" >&2
+            if grep -qiE "immutable release|already exists" "$ERR"; then
+              echo "tag ${TAG} is taken (deleted/immutable or held) — taking the next number" >&2
               N=$((N + 1))
               continue
             fi
@@ -152,8 +156,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.beta-meta.outputs.tag }}
         run: |
-          # The tag was reserved (as a draft) by beta-meta, and the assets were
-          # built carrying exactly this version — only upload and un-draft here.
+          # The tag was reserved (assetless prerelease) by beta-meta, and the
+          # assets were built carrying exactly this version — only attach here.
           gh release upload "$TAG" dist/*
-          gh release edit "$TAG" --draft=false
           echo "beta **${TAG}** from ${GITHUB_SHA} published" >> "$GITHUB_STEP_SUMMARY"
