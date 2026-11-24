@@ -99,7 +99,7 @@ public class ReaderTests
     public async Task Reader_OrphanGuard_ExitsWhenServerPidGone()
     {
         using var h = await VaultHarness.CreateAsync();
-        var psi = new System.Diagnostics.ProcessStartInfo
+        var psi = new ProcessStartInfo
         {
             FileName = VaultHarness.ServerExePath,
             RedirectStandardInput = true,

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using KeePassXCMcp.Infra;
 
 namespace KeePassXCMcp.Tests;
@@ -41,8 +42,8 @@ public static class CliProbe
 public sealed class RequiresCliFactAttribute : FactAttribute
 {
     public RequiresCliFactAttribute(
-        [System.Runtime.CompilerServices.CallerFilePath] string? sourceFilePath = null,
-        [System.Runtime.CompilerServices.CallerLineNumber] int sourceLineNumber = -1)
+        [CallerFilePath] string? sourceFilePath = null,
+        [CallerLineNumber] int sourceLineNumber = -1)
         : base(sourceFilePath, sourceLineNumber)
     {
         if (CliProbe.PathOrNull is null)
@@ -53,8 +54,8 @@ public sealed class RequiresCliFactAttribute : FactAttribute
 public sealed class RequiresCliTheoryAttribute : TheoryAttribute
 {
     public RequiresCliTheoryAttribute(
-        [System.Runtime.CompilerServices.CallerFilePath] string? sourceFilePath = null,
-        [System.Runtime.CompilerServices.CallerLineNumber] int sourceLineNumber = -1)
+        [CallerFilePath] string? sourceFilePath = null,
+        [CallerLineNumber] int sourceLineNumber = -1)
         : base(sourceFilePath, sourceLineNumber)
     {
         if (CliProbe.PathOrNull is null)

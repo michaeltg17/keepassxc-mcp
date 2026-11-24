@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -79,14 +80,14 @@ public static class ReaderProtocol
         if (session.Pid <= 0) return false;
         try
         {
-            var proc = System.Diagnostics.Process.GetProcessById(session.Pid);
+            var proc = Process.GetProcessById(session.Pid);
             return !proc.HasExited;
         }
         catch (ArgumentException)
         {
             return false; // pid no longer exists
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch (Win32Exception)
         {
             return false; // process exists but is not accessible — treat as stale
         }
@@ -256,9 +257,9 @@ public static class ReaderRunner
     {
         try
         {
-            return !System.Diagnostics.Process.GetProcessById(pid).HasExited;
+            return !Process.GetProcessById(pid).HasExited;
         }
-        catch (Exception e) when (e is ArgumentException or System.ComponentModel.Win32Exception)
+        catch (Exception e) when (e is ArgumentException or Win32Exception)
         {
             return false;
         }

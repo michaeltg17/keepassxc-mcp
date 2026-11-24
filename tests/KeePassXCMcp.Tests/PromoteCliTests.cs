@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using KeePassXCMcp.Infra;
+using KeePassXCMcp.Tools;
 
 namespace KeePassXCMcp.Tests;
 
@@ -53,7 +54,7 @@ public class PromoteCliTests
         var show = ShowParser.Parse(await h.ShowMainAsync("Inbox/Legal/Contract"));
         var att = Assert.Single(show.Attachments);
         Assert.Equal("contract.pdf", att.Name);
-        var (sha, _) = await KeePassXCMcp.Tools.StagingOps.HashStoredAttachmentAsync(
+        var (sha, _) = await StagingOps.HashStoredAttachmentAsync(
             h.Config, h.Cli, h.MainPath, VaultHarness.MainPassword, null, "Inbox/Legal/Contract", "contract.pdf");
         Assert.Equal(expectedSha, sha);
         // staging flushed, request cleared, state recorded:

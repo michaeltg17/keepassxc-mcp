@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using KeePassXCMcp.Infra;
+using KeePassXCMcp.Tools;
 
 namespace KeePassXCMcp.Tests;
 
@@ -73,7 +74,7 @@ public class KeePassCliTests
         var show = ShowParser.Parse(await h.ShowMainAsync(entry));
         var stored = Assert.Single(show.Attachments);
         Assert.Equal("doc.pdf", stored.Name);
-        var (sha, size) = await KeePassXCMcp.Tools.StagingOps.HashStoredAttachmentAsync(
+        var (sha, size) = await StagingOps.HashStoredAttachmentAsync(
             h.Config, h.Cli, h.MainPath, VaultHarness.MainPassword, h.MainHasKeyfile ? h.KeyfilePath : null, entry, "doc.pdf");
         Assert.Equal(attachments[0].Sha256, sha);
         Assert.Equal(2048, size);
