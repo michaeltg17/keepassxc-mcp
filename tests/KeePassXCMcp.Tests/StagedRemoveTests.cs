@@ -37,35 +37,33 @@ public class StagedRemoveTests
             ["label"] = "Inbox/RemoveMe",
             ["value"] = "doomed-secret-value-1",
         }));
-        Assert.Contains("Staged into sandbox", stage);
+        stage.Should().Contain("Staged into sandbox");
 
         var promote = Text(await client.CallToolAsync("vault_promote", new Dictionary<string, object?>()));
-        Assert.Contains("Promotion request recorded", promote);
+        promote.Should().Contain("Promotion request recorded");
 
         var remove = Text(await client.CallToolAsync("vault_staged_remove", new Dictionary<string, object?>
         {
             ["entryPath"] = "Inbox/RemoveMe",
             ["confirm"] = "Inbox/RemoveMe",
         }));
-        Assert.Contains("RECYCLED, not purged", remove);
-        Assert.Contains("recycled", remove);
+        remove.Should().Contain("RECYCLED, not purged").And.Contain("recycled");
 
         // vault_list_staged no longer shows it, and neither does the promotion manifest.
         var list = Text(await client.CallToolAsync("vault_list_staged", new Dictionary<string, object?>()));
-        Assert.DoesNotContain("Inbox/RemoveMe", list);
+        list.Should().NotContain("Inbox/RemoveMe");
         var pending = PendingRequest.TryLoad(harness.Paths);
-        Assert.NotNull(pending);
-        Assert.DoesNotContain(pending.Entries, e => e.Path == "Inbox/RemoveMe");
+        pending.Should().NotBeNull();
+        pending!.Entries.Should().NotContain(e => e.Path == "Inbox/RemoveMe");
 
         // Provenance record dropped.
-        Assert.DoesNotContain(ProvenanceStore.Load(harness.Paths).Records, r => r.Path == "Inbox/RemoveMe");
+        ProvenanceStore.Load(harness.Paths).Records.Should().NotContain(r => r.Path == "Inbox/RemoveMe");
 
         // The recycle-bin claim, proven RAW: keepassxc-cli search still matches the entry
         // under a Recycle Bin path (a raw ls would not show it — that is the filter's job).
         var search = await harness.Cli.SearchAsync(harness.StagingPath, VaultHarness.StagingPassword, null, "RemoveMe");
         Assert.True(search.Success, search.FailureSummary);
-        Assert.Contains("Recycle Bin", search.StdOut);
-        Assert.Contains("RemoveMe", search.StdOut);
+        search.StdOut.Should().Contain("Recycle Bin").And.Contain("RemoveMe");
     }
 
     [RequiresCliFact]
@@ -83,11 +81,10 @@ public class StagedRemoveTests
             ["entryPath"] = "Inbox/KeepMe",
             ["confirm"] = "Inbox/WRONG",
         }));
-        Assert.Contains("Error", reply);
-        Assert.Contains("confirmation does not match", reply);
+        reply.Should().Contain("Error").And.Contain("confirmation does not match");
 
-        Assert.Contains("Inbox/KeepMe", await harness.StagedEntryPathsAsync());
-        Assert.Contains(ProvenanceStore.Load(harness.Paths).Records, r => r.Path == "Inbox/KeepMe");
+        (await harness.StagedEntryPathsAsync()).Should().Contain("Inbox/KeepMe");
+        ProvenanceStore.Load(harness.Paths).Records.Should().Contain(r => r.Path == "Inbox/KeepMe");
     }
 
     [RequiresCliFact]
@@ -102,11 +99,9 @@ public class StagedRemoveTests
             ["entryPath"] = "Inbox/NoSuchEntry",
             ["confirm"] = "Inbox/NoSuchEntry",
         }));
-        Assert.Contains("Error", reply);
-        Assert.Contains("is not in staging", reply);
-        Assert.Contains("Inbox/RealEntry", reply); // the current staged listing comes with the error
+        reply.Should().Contain("Error").And.Contain("is not in staging").And.Contain("Inbox/RealEntry"); // the current staged listing comes with the error
 
-        Assert.Contains("Inbox/RealEntry", await harness.StagedEntryPathsAsync()); // nothing changed
+        (await harness.StagedEntryPathsAsync()).Should().Contain("Inbox/RealEntry"); // nothing changed
     }
 
     [RequiresCliFact]
@@ -125,22 +120,22 @@ public class StagedRemoveTests
             ["entryPath"] = "Inbox/ReStaged",
             ["confirm"] = "Inbox/ReStaged",
         }));
-        Assert.Contains("RECYCLED", remove);
-        Assert.Empty(ProvenanceStore.Load(harness.Paths).Records);
+        remove.Should().Contain("RECYCLED");
+        ProvenanceStore.Load(harness.Paths).Records.Should().BeEmpty();
 
         var restage = Text(await client.CallToolAsync("vault_stage_value", new Dictionary<string, object?>
         {
             ["label"] = "Inbox/ReStaged",
             ["value"] = "second-value-bbb",
         }));
-        Assert.Contains("Staged into sandbox", restage);
+        restage.Should().Contain("Staged into sandbox");
 
         // One fresh record for the new value — no stale fingerprint, no retired leftovers.
         var rec = Assert.Single(ProvenanceStore.Load(harness.Paths).Records);
-        Assert.Equal("Inbox/ReStaged", rec.Path);
-        Assert.Equal(Origin.SeenByModel, rec.Origin);
-        Assert.Empty(rec.RetiredFingerprints);
-        Assert.NotEqual(Hashing.Sha256Hex("first-value-aaa"), rec.FingerprintSha256);
-        Assert.Equal(Hashing.Sha256Hex("second-value-bbb"), rec.FingerprintSha256);
+        rec.Path.Should().Be("Inbox/ReStaged");
+        rec.Origin.Should().Be(Origin.SeenByModel);
+        rec.RetiredFingerprints.Should().BeEmpty();
+        rec.FingerprintSha256.Should().NotBe(Hashing.Sha256Hex("first-value-aaa"));
+        rec.FingerprintSha256.Should().Be(Hashing.Sha256Hex("second-value-bbb"));
     }
 }

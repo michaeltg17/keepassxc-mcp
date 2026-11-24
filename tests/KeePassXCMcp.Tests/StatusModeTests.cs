@@ -23,8 +23,8 @@ public class StatusModeTests
         var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, proc.ExitCode);
-        Assert.Matches(@"^keepassxc-mcp \d+\.\d+\.\d+", stdout.Trim());
+        proc.ExitCode.Should().Be(0);
+        stdout.Trim().Should().MatchRegex(@"^keepassxc-mcp \d+\.\d+\.\d+");
     }
     [RequiresCliFact]
     public async Task Status_PrintsRedactedConfigAndStagingState()
@@ -48,15 +48,13 @@ public class StatusModeTests
         var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, proc.ExitCode);
-        Assert.Contains("app version   : " + AppInfo.Version, stdout);
-        Assert.Contains($"staged entries: 1", stdout);
-        Assert.Contains("StatusEntry", stdout);
-        Assert.Contains("pending request : 1 entries", stdout);
-        Assert.Contains("[REDACTED", stdout);
+        proc.ExitCode.Should().Be(0);
+        stdout.Should().Contain("app version   : " + AppInfo.Version)
+            .And.Contain("staged entries: 1").And.Contain("StatusEntry")
+            .And.Contain("pending request : 1 entries").And.Contain("[REDACTED");
         // stagingPassword value must NEVER appear in status output:
-        Assert.DoesNotContain(VaultHarness.StagingPassword, stdout);
+        stdout.Should().NotContain(VaultHarness.StagingPassword);
         // and the main vault password is never part of config at all:
-        Assert.DoesNotContain("mainVaultPassword", File.ReadAllText(harness.Paths.ConfigFile));
+        File.ReadAllText(harness.Paths.ConfigFile).Should().NotContain("mainVaultPassword");
     }
 }

@@ -12,7 +12,7 @@ public class KeePassCliTests
     public async Task DbCreate_Then_ListAndAddEntry_ShowRoundTrip()
     {
         using var h = await VaultHarness.CreateAsync();
-        Assert.Empty(await h.StagedEntryPathsAsync());
+        (await h.StagedEntryPathsAsync()).Should().BeEmpty();
 
         await h.Staging.EnsureStagingAsync();
         await h.Cli.EnsureGroupAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Inbox/Nested");
@@ -20,12 +20,12 @@ public class KeePassCliTests
         Assert.True(add.Success, add.FailureSummary);
 
         var entries = await h.StagedEntryPathsAsync();
-        Assert.Contains("Inbox/Nested/Alpha", entries);
+        entries.Should().Contain("Inbox/Nested/Alpha");
 
         var show = await h.Cli.ShowAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Inbox/Nested/Alpha");
         var parsed = ShowParser.Parse(show.StdOut);
-        Assert.Equal("Alpha", parsed.Title);
-        Assert.Equal("line one\nline two", parsed.Notes);
+        parsed.Title.Should().Be("Alpha");
+        parsed.Notes.Should().Be("line one\nline two");
     }
 
     [RequiresCliFact]
@@ -36,11 +36,11 @@ public class KeePassCliTests
         var sourceSha = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(source)));
 
         var (entry, attachments) = await h.StageAsync("Inbox", "WithFile", "notes body", source);
-        Assert.Equal("Inbox/WithFile", entry);
+        entry.Should().Be("Inbox/WithFile");
         var a = Assert.Single(attachments);
-        Assert.Equal("report.bin", a.Name);
-        Assert.Equal(4096, a.Size);
-        Assert.Equal(sourceSha, a.Sha256);
+        a.Name.Should().Be("report.bin");
+        a.Size.Should().Be(4096);
+        a.Sha256.Should().Be(sourceSha);
     }
 
     [RequiresCliFact]
@@ -53,8 +53,8 @@ public class KeePassCliTests
         var dry = await h.Cli.MergeAsync(h.MainPath, VaultHarness.MainPassword, null, h.StagingPath, VaultHarness.StagingPassword, dryRun: true);
         Assert.True(dry.Success, dry.FailureSummary);
         // keepassxc-cli wording varies by version ("Added: …" / "Creating missing …").
-        Assert.Matches("Added:|Creating missing", dry.StdOut);
-        Assert.False(await h.MainHasEntryAsync("Inbox/ToMerge"), "dry-run must not modify the main vault");
+        dry.StdOut.Should().MatchRegex("Added:|Creating missing");
+        (await h.MainHasEntryAsync("Inbox/ToMerge")).Should().BeFalse("dry-run must not modify the main vault");
     }
 
     [RequiresCliTheory]
@@ -70,14 +70,14 @@ public class KeePassCliTests
             h.StagingPath, VaultHarness.StagingPassword, dryRun: false);
         Assert.True(merge.Success, merge.FailureSummary);
 
-        Assert.True(await h.MainHasEntryAsync(entry));
+        (await h.MainHasEntryAsync(entry)).Should().BeTrue();
         var show = ShowParser.Parse(await h.ShowMainAsync(entry));
         var stored = Assert.Single(show.Attachments);
-        Assert.Equal("doc.pdf", stored.Name);
+        stored.Name.Should().Be("doc.pdf");
         var (sha, size) = await StagingOps.HashStoredAttachmentAsync(
             h.Config, h.Cli, h.MainPath, VaultHarness.MainPassword, h.MainHasKeyfile ? h.KeyfilePath : null, entry, "doc.pdf");
-        Assert.Equal(attachments[0].Sha256, sha);
-        Assert.Equal(2048, size);
+        sha.Should().Be(attachments[0].Sha256);
+        size.Should().Be(2048);
     }
 
     [RequiresCliFact]
@@ -86,10 +86,10 @@ public class KeePassCliTests
         using var h = await VaultHarness.CreateAsync(mainWithKeyfile: true);
         // password only (no -k) must fail...
         var noKeyfile = await h.Cli.ShowRawAsync(h.MainPath, VaultHarness.MainPassword, null, "anything");
-        Assert.False(noKeyfile.Success);
-        // ...and -k + password in one call must work (empty listing succeeds).
+        noKeyfile.Success.Should().BeFalse();
+        // ...and -k + password in one call must work: the listing itself succeeds and is empty.
         var ls = await h.Cli.ListEntryPathsAsync(h.MainPath, VaultHarness.MainPassword, h.KeyfilePath);
-        Assert.NotNull(ls);
+        ls.Should().BeEmpty();
     }
 
     [RequiresCliFact]
@@ -106,8 +106,7 @@ public class KeePassCliTests
 
         var paths = await h.Cli.ListEntryPathsAsync(h.MainPath, VaultHarness.MainPassword, null);
 
-        Assert.Contains("Keep/Me", paths);
-        Assert.DoesNotContain(paths, p => p.Contains("[empty]"));
+        paths.Should().Contain("Keep/Me").And.NotContain(p => p.Contains("[empty]"));
     }
 
     [Fact]
@@ -127,10 +126,10 @@ public class KeePassCliTests
               payload.txt (16 B)
               big.bin (1.5 KiB)
             """);
-        Assert.Equal("Note", parsed.Title);
-        Assert.Equal("first line\n  second line", parsed.Notes);
-        Assert.Equal(2, parsed.Attachments.Count);
-        Assert.Equal(("payload.txt", 16L), (parsed.Attachments[0].Name, parsed.Attachments[0].SizeBytes));
-        Assert.Equal(("big.bin", 1536L), (parsed.Attachments[1].Name, parsed.Attachments[1].SizeBytes));
+        parsed.Title.Should().Be("Note");
+        parsed.Notes.Should().Be("first line\n  second line");
+        parsed.Attachments.Should().HaveCount(2);
+        parsed.Attachments.Select(a => (a.Name, a.SizeBytes)).Should()
+            .Equal(("payload.txt", 16L), ("big.bin", 1536L)); // ordered sequence equality
     }
 }

@@ -45,35 +45,32 @@ public class ReaderTests
         while (!ReaderProtocol.TryGetLiveSession(h.Paths, out _) && DateTime.UtcNow < deadline)
             await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.True(ReaderProtocol.TryGetLiveSession(h.Paths, out var session), "reader session never opened");
-        Assert.Equal(proc.Id, session.Pid);
+        session.Pid.Should().Be(proc.Id);
 
         // search: paths only
         var search = await ReaderClient.SendAsync(h.Paths, "search", "Reader", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         Assert.True(search.Ok, search.Error);
-        Assert.Contains("Inbox/ReaderEntry", search.Output);
-        Assert.DoesNotContain(secret, search.Output);
+        search.Output.Should().Contain("Inbox/ReaderEntry").And.NotContain(secret);
 
         // get: metadata yes, value no — and the CLI-level mask is visible end-to-end
         var get = await ReaderClient.SendAsync(h.Paths, "get", "Inbox/ReaderEntry", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         Assert.True(get.Ok, get.Error);
-        Assert.Contains("Title: ReaderEntry", get.Output);
-        Assert.Contains("UserName: svc-user", get.Output);
-        Assert.Contains("reader notes", get.Output);
-        Assert.Contains("Password: PROTECTED", get.Output);
-        Assert.DoesNotContain(secret, get.Output);
+        get.Output.Should().Contain("Title: ReaderEntry").And.Contain("UserName: svc-user")
+            .And.Contain("reader notes").And.Contain("Password: PROTECTED")
+            .And.NotContain(secret);
 
         // get on a missing entry: clean error result, reader survives
         var missing = await ReaderClient.SendAsync(h.Paths, "get", "Inbox/Nope", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
-        Assert.False(missing.Ok);
+        missing.Ok.Should().BeFalse();
         var stillAlive = await ReaderClient.SendAsync(h.Paths, "search", "Reader", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         Assert.True(stillAlive.Ok, stillAlive.Error);
 
         var close = await ReaderClient.SendAsync(h.Paths, "close", "", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         Assert.True(close.Ok, close.Error);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(0, proc.ExitCode);
-        Assert.False(File.Exists(h.Paths.ReaderSessionFile));
-        Assert.Contains("Closed by request", await stderrTask);
+        proc.ExitCode.Should().Be(0);
+        File.Exists(h.Paths.ReaderSessionFile).Should().BeFalse();
+        (await stderrTask).Should().Contain("Closed by request");
         _ = await stdoutTask;
     }
 
@@ -88,11 +85,10 @@ public class ReaderTests
         var stderr = await stderrTask;
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, proc.ExitCode);
-        Assert.Contains("Attempt failed", stderr);
-        Assert.Contains("Input closed at the password prompt", stderr);
-        Assert.False(ReaderProtocol.TryGetLiveSession(h.Paths, out _));
-        Assert.False(File.Exists(h.Paths.ReaderSessionFile));
+        proc.ExitCode.Should().Be(1);
+        stderr.Should().Contain("Attempt failed").And.Contain("Input closed at the password prompt");
+        ReaderProtocol.TryGetLiveSession(h.Paths, out _).Should().BeFalse();
+        File.Exists(h.Paths.ReaderSessionFile).Should().BeFalse();
     }
 
     [RequiresCliFact]
@@ -119,8 +115,8 @@ public class ReaderTests
         var stderr = await proc.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken); // orphan guard closes it
 
-        Assert.Equal(0, proc.ExitCode);
-        Assert.Contains("orphan guard", stderr);
-        Assert.False(File.Exists(h.Paths.ReaderSessionFile));
+        proc.ExitCode.Should().Be(0);
+        stderr.Should().Contain("orphan guard");
+        File.Exists(h.Paths.ReaderSessionFile).Should().BeFalse();
     }
 }

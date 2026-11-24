@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.12.0" />
     <PackageReference Include="xunit.v3" Version="4.0.3" />
+    <PackageReference Include="AwesomeAssertions" Version="9.6.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,6 +22,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Stronger assertions (exact-set equality, ordered sequences, chained contracts). -->
+    <Using Include="AwesomeAssertions" />
   </ItemGroup>
 
   <!-- e2e tests spawn the real built executable (mcp + promote modes). -->

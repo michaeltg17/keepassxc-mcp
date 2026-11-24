@@ -38,29 +38,28 @@ public class SecretFlowsTests
         using var h = await VaultHarness.CreateAsync();
         var (exit, stdout, stderr) = await RunVerbAsync(h, null, "generate", "--label", "Svcs/generated", "--length", "20");
 
-        Assert.Equal(0, exit);
-        Assert.Contains("Generated", stdout);
-        Assert.Contains("Svcs/generated", stdout);
+        exit.Should().Be(0);
+        stdout.Should().Contain("Generated").And.Contain("Svcs/generated");
 
         // The entry exists in staging with a real 20-char password.
         var staged = await h.StagedEntryPathsAsync();
-        Assert.Contains("Svcs/generated", staged);
-        var value = await h.Cli.ReadAttributeAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Svcs/generated", "Password");
-        Assert.Equal(20, value.TrimEnd('\r', '\n').Length);
+        staged.Should().Contain("Svcs/generated");
+        var value = (await h.Cli.ReadAttributeAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Svcs/generated", "Password")).TrimEnd('\r', '\n');
+        value.Should().HaveLength(20);
 
         // The value never appears in any output — only path/uuid/fingerprint do.
-        Assert.DoesNotContain(value.TrimEnd('\r', '\n'), stdout);
-        Assert.DoesNotContain(value.TrimEnd('\r', '\n'), stderr);
+        stdout.Should().NotContain(value);
+        stderr.Should().NotContain(value);
 
         // Provenance: generated, fingerprint = sha256 of the actual stored value.
         var prov = ProvenanceStore.Load(h.Paths);
         var rec = Assert.Single(prov.Records);
-        Assert.Equal("Svcs/generated", rec.Path);
-        Assert.Equal(Origin.Generated, rec.Origin);
-        Assert.Equal(Hashing.Sha256Hex(value.TrimEnd('\r', '\n')), rec.FingerprintSha256);
+        rec.Path.Should().Be("Svcs/generated");
+        rec.Origin.Should().Be(Origin.Generated);
+        rec.FingerprintSha256.Should().Be(Hashing.Sha256Hex(value));
 
         // The main vault is untouched.
-        Assert.False(await h.MainHasEntryAsync("Svcs/generated"));
+        (await h.MainHasEntryAsync("Svcs/generated")).Should().BeFalse();
     }
 
     [RequiresCliFact]
@@ -68,11 +67,10 @@ public class SecretFlowsTests
     {
         using var h = await VaultHarness.CreateAsync();
         var first = await RunVerbAsync(h, null, "generate", "--label", "Svcs/dup");
-        Assert.Equal(0, first.Exit);
+        first.Exit.Should().Be(0);
         var (exit, _, stderr) = await RunVerbAsync(h, null, "generate", "--label", "Svcs/dup");
-        Assert.Equal(1, exit);
-        Assert.Contains("already exists", stderr);
-        Assert.Contains("vault_rotate", stderr);
+        exit.Should().Be(1);
+        stderr.Should().Contain("already exists").And.Contain("vault_rotate");
     }
 
     [RequiresCliFact]
@@ -82,18 +80,18 @@ public class SecretFlowsTests
         const string value = "s3cr3t-service-key-9f2a";
         var (exit, stdout, stderr) = await RunVerbAsync(h, value + "\n", "stage", "--label", "Svcs/piped", "--notes", "from service");
 
-        Assert.Equal(0, exit);
+        exit.Should().Be(0);
         var stored = await h.Cli.ReadAttributeAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Svcs/piped", "Password");
-        Assert.Equal(value, stored);
+        stored.Should().Be(value);
 
         // the value travelled through the process but was never echoed anywhere
-        Assert.DoesNotContain(value, stdout);
-        Assert.DoesNotContain(value, stderr);
+        stdout.Should().NotContain(value);
+        stderr.Should().NotContain(value);
 
         var prov = ProvenanceStore.Load(h.Paths);
         var rec = Assert.Single(prov.Records);
-        Assert.Equal(Origin.Piped, rec.Origin);
-        Assert.Equal(Hashing.Sha256Hex(value), rec.FingerprintSha256);
+        rec.Origin.Should().Be(Origin.Piped);
+        rec.FingerprintSha256.Should().Be(Hashing.Sha256Hex(value));
     }
 
     [RequiresCliFact]
@@ -101,17 +99,17 @@ public class SecretFlowsTests
     {
         using var h = await VaultHarness.CreateAsync();
         var (exit, _, stderr) = await RunVerbAsync(h, "", "stage", "--label", "Svcs/empty");
-        Assert.Equal(1, exit);
-        Assert.Contains("Empty stdin", stderr);
-        Assert.Empty(ProvenanceStore.Load(h.Paths).Records);
+        exit.Should().Be(1);
+        stderr.Should().Contain("Empty stdin");
+        ProvenanceStore.Load(h.Paths).Records.Should().BeEmpty();
     }
 
     [RequiresCliFact]
     public async Task AuditVerb_ListsTrackedAndExposedCounts()
     {
         using var h = await VaultHarness.CreateAsync();
-        Assert.Equal(0, (await RunVerbAsync(h, null, "generate", "--label", "Svcs/one")).Exit);
-        Assert.Equal(0, (await RunVerbAsync(h, "v\n", "stage", "--label", "Svcs/two")).Exit);
+        (await RunVerbAsync(h, null, "generate", "--label", "Svcs/one")).Exit.Should().Be(0);
+        (await RunVerbAsync(h, "v\n", "stage", "--label", "Svcs/two")).Exit.Should().Be(0);
 
         // seed one seen-by-model record the way the MCP tool writes it
         var prov = ProvenanceStore.Load(h.Paths);
@@ -119,10 +117,8 @@ public class SecretFlowsTests
         prov.Save(h.Paths);
 
         var (exit, stdout, _) = await RunVerbAsync(h, null, "audit");
-        Assert.Equal(0, exit);
-        Assert.Contains("Svcs/one", stdout);
-        Assert.Contains("Svcs/exposed", stdout);
-        Assert.Contains("exposed to a model: 1", stdout);
-        Assert.Contains("rotate or dismiss", stdout);
+        exit.Should().Be(0);
+        stdout.Should().Contain("Svcs/one").And.Contain("Svcs/exposed")
+            .And.Contain("exposed to a model: 1").And.Contain("rotate or dismiss");
     }
 }

@@ -14,7 +14,7 @@ public class MergeUuidStabilityTests
         await h.StageAsync("Inbox", "UuidCheck", "note body");
         var stagingShow = ShowParser.Parse(
             (await h.Cli.ShowAsync(h.StagingPath, VaultHarness.StagingPassword, null, "Inbox/UuidCheck")).StdOut);
-        Assert.NotEmpty(stagingShow.Uuid);
+        stagingShow.Uuid.Should().NotBeEmpty();
 
         await h.RecordPromotionRequestAsync();
 
@@ -36,9 +36,9 @@ public class MergeUuidStabilityTests
         await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal((int)Promoter.Exit.Ok, proc.ExitCode);
+        proc.ExitCode.Should().Be((int)Promoter.Exit.Ok);
 
         var mainShow = ShowParser.Parse(await h.ShowMainAsync("Inbox/UuidCheck"));
-        Assert.Equal(stagingShow.Uuid, mainShow.Uuid);
+        mainShow.Uuid.Should().Be(stagingShow.Uuid);
     }
 }

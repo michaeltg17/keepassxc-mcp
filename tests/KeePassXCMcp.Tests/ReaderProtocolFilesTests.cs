@@ -78,11 +78,9 @@ public class ReaderProtocolFilesTests
         // protocol's doing, not an empty vault.
         var rawSearch = await h.Cli.SearchAsync(h.MainPath, VaultHarness.MainPassword, null, "Secret");
         Assert.True(rawSearch.Success, rawSearch.FailureSummary);
-        Assert.Contains("Inbox/SecretAlpha", rawSearch.StdOut);
-        Assert.Contains("Inbox/SecretBeta", rawSearch.StdOut);
-        Assert.Contains("Inbox/SecretGamma", rawSearch.StdOut);
+        rawSearch.StdOut.Should().Contain("Inbox/SecretAlpha").And.Contain("Inbox/SecretBeta").And.Contain("Inbox/SecretGamma");
         var rawValue = await h.Cli.ReadAttributeAsync(h.MainPath, VaultHarness.MainPassword, null, "Inbox/SecretBeta", "Password");
-        Assert.Equal(secret, rawValue);
+        rawValue.Should().Be(secret);
 
         // Real reader session, driven over the exact file protocol the tools use.
         using var proc = StartReader(h);
@@ -97,8 +95,7 @@ public class ReaderProtocolFilesTests
 
         var search = await ReaderClient.SendAsync(h.Paths, "search", "Secret", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         Assert.True(search.Ok, search.Error);
-        Assert.Contains("Inbox/SecretAlpha", search.Output);
-        Assert.DoesNotContain(secret, search.Output);
+        search.Output.Should().Contain("Inbox/SecretAlpha").And.NotContain(secret);
         AssertNoSecretBytes(h.Paths, secret); // mid-session: session + command files on disk
 
         // One exchange performed RAW, so the result file's own bytes can be inspected while
@@ -112,19 +109,19 @@ public class ReaderProtocolFilesTests
         var raw = ReaderProtocol.TryReadAtomic<ReaderResult>(h.Paths.ReaderResultFile);
         Assert.NotNull(raw);
         Assert.True(raw.Ok, raw.Error);
-        Assert.Contains("Title: SecretBeta", raw.Output);      // the protocol really fetched the entry…
-        Assert.Contains("Password: PROTECTED", raw.Output);    // …masked — and the file bytes…
+        raw.Output.Should().Contain("Title: SecretBeta")      // the protocol really fetched the entry…
+            .And.Contain("Password: PROTECTED");              // …masked — and the file bytes…
         Assert.False(ContainsSequence(onDisk, Encoding.UTF8.GetBytes(secret)), "the on-disk result file held the value"); // …never did.
         File.Delete(h.Paths.ReaderResultFile);
 
         var close = await ReaderClient.SendAsync(h.Paths, "close", "", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         Assert.True(close.Ok, close.Error);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(0, proc.ExitCode);
+        proc.ExitCode.Should().Be(0);
         _ = await stdoutTask;
 
         // After teardown: nothing left behind in any encoding.
-        Assert.False(File.Exists(h.Paths.ReaderSessionFile));
+        File.Exists(h.Paths.ReaderSessionFile).Should().BeFalse();
         AssertNoSecretBytes(h.Paths, secret);
     }
 }
