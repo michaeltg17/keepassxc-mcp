@@ -125,7 +125,11 @@ jobs:
           # A deleted release keeps its tag name reserved forever (immutable
           # releases) while /tags stops listing it, so the computed candidate may
           # already be burned. Self-heal: on that 422 take the next number; any
-          # other error fails as before.
+          # other error fails as before. (Verified live: run 45401543346 skipped
+          # burned .1/.2 and published .3.) The retry changes only the TAG — the
+          # version stamped into the built assets stays the candidate beta-meta
+          # computed, which is fine: beta builds are verification artifacts,
+          # never installed by default.
           BASE="${VERSION%-beta.*}"
           N="${VERSION##*-beta.}"
           ERR=$(mktemp)
