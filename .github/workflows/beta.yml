@@ -90,7 +90,7 @@ jobs:
               echo "reserved **${TAG}** (git tag at ${GITHUB_SHA}) — every asset builds as ${BASE}-beta.${N}" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            if grep -qiE "immutable|already exists|restricted|reference cannot be created" "$ERR"; then
+            if grep -qiE "immutable|already exists|restricted|reference cannot be created|reference update failed" "$ERR"; then
               echo "tag ${TAG} is taken (burned or held) — taking the next number" >&2
               N=$((N + 1))
               continue
