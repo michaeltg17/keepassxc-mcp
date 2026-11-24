@@ -3,9 +3,17 @@ name: Beta
 # On-demand pre-release builds for verification before a real release:
 # Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
 # Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N (N
-# auto-increments; the Release itself always points at the exact commit, so the
-# tag does not repeat it). It NEVER touches the csproj — beta versions are
+# auto-increments and skips numbers burned by DELETED betas — GitHub reserves a
+# deleted release's tag name forever ("immutable release"), while the tag list
+# no longer shows it; the publish step detects the 422 and takes the next
+# number). The Release itself always points at the exact commit, so the tag
+# does not repeat it. It NEVER touches the csproj — beta versions are
 # command-line build inputs, and <Version> still marks real releases only (AGENTS.md).
+#
+# Beta-tag deletion policy: never delete a beta tag of the CURRENT or NEXT
+# release — a later run would re-propose its number and hit the reserved-name
+# 422. Only prereleases of versions strictly older than the newest STABLE
+# release are safe to delete.
 #
 # Stable installs are unaffected: install.ps1/install.sh read releases/latest,
 # which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
@@ -29,7 +37,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -54,12 +61,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BASE=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassXCMcp/KeePassXCMcp.csproj)
+          # Starting candidate only: tag numbers deleted with their (immutable)
+          # release are invisible here but stay reserved — beta-publish skips
+          # them on the 422 and the summary there names the tag ACTUALLY made.
           N=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate --jq '.[].name' \
               | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
           N=$(( ${N:-0} + 1 ))
           echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
-          echo "beta **v${BASE}-beta.${N}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
 
   beta-assets:
     needs: beta-meta
@@ -104,7 +112,6 @@ jobs:
       - name: Create prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.beta-meta.outputs.tag }}
           VERSION: ${{ needs.beta-meta.outputs.version }}
         run: |
           cat > NOTES.md <<EOF
@@ -115,9 +122,31 @@ jobs:
 
           The default install commands (without that opt-in) keep installing the latest STABLE release.
           EOF
-          gh release create "$TAG" \
-            dist/* \
-            --prerelease \
-            --target "${GITHUB_SHA}" \
-            --title "$TAG" \
-            --notes-file NOTES.md
+          # A deleted release keeps its tag name reserved forever (immutable
+          # releases) while /tags stops listing it, so the computed candidate may
+          # already be burned. Self-heal: on that 422 take the next number; any
+          # other error fails as before.
+          BASE="${VERSION%-beta.*}"
+          N="${VERSION##*-beta.}"
+          ERR=$(mktemp)
+          for _ in $(seq 1 15); do
+            TAG="v${BASE}-beta.${N}"
+            if gh release create "$TAG" \
+              dist/* \
+              --prerelease \
+              --target "${GITHUB_SHA}" \
+              --title "$TAG" \
+              --notes-file NOTES.md 2>"$ERR"; then
+              echo "beta **${TAG}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if grep -qi "immutable release" "$ERR"; then
+              echo "tag ${TAG} is reserved by a deleted release — taking the next number" >&2
+              N=$((N + 1))
+              continue
+            fi
+            cat "$ERR" >&2
+            exit 1
+          done
+          echo "::error::no free beta tag after 15 attempts starting at ${VERSION}" >&2
+          exit 1
