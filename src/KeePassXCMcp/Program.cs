@@ -33,11 +33,12 @@ switch ((args.Length == 0 ? "mcp" : args[0]).ToLowerInvariant())
         Console.WriteLine($"keepassxc-mcp {AppInfo.Version}");
         return 0;
     case "help" or "-h" or "--help":
-        PrintUsage();
+        PrintUsage(ConsoleUi.ForStderrDefaultTheme());
         return 0;
     default:
-        Console.Error.WriteLine($"Unknown mode: {args[0]}");
-        PrintUsage();
+        var unknown = ConsoleUi.ForStderrDefaultTheme();
+        unknown.Line($"Unknown mode: {args[0]}", Tone.Error);
+        PrintUsage(unknown);
         return 2;
 }
 
@@ -92,7 +93,7 @@ static async Task<int> RunPromoteAsync()
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
@@ -112,11 +113,12 @@ static int RunPromoteWindow()
     var result = ApproverLauncher.TryOpenPromoteWindow();
     if (result.Launched)
     {
-        Console.WriteLine($"Approver window opened: {result.Detail}");
-        Console.WriteLine("Review the manifest, confirm y, and type the master password in that window.");
+        var ui = ConsoleUi.ForStdoutDefaultTheme();
+        ui.Line($"Approver window opened: {result.Detail}", Tone.Success);
+        ui.Line("Review the manifest, confirm y, and type the master password in that window.", Tone.Faint);
         return 0;
     }
-    Console.Error.WriteLine("Could not open an approver window: " + result.Detail);
+    ConsoleUi.ForStderrDefaultTheme().Line("Could not open an approver window: " + result.Detail, Tone.Error);
     return 1;
 }
 
@@ -133,7 +135,7 @@ static async Task<int> RunReaderAsync(string[] args)
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
@@ -142,7 +144,7 @@ static async Task<int> RunReaderAsync(string[] args)
     {
         if (!int.TryParse(s, out serverPid))
         {
-            Console.Error.WriteLine("--server expects a numeric pid.");
+            ConsoleUi.ForStderrDefaultTheme().Line("--server expects a numeric pid.", Tone.Error);
             return 2;
         }
     }
@@ -163,11 +165,12 @@ static int RunReaderWindow()
     var result = ApproverLauncher.TryOpenReaderWindow(serverPid: 0); // CLI-launched: no orphan watch, idles out
     if (result.Launched)
     {
-        Console.WriteLine($"Reader window opened: {result.Detail}");
-        Console.WriteLine("Type the master password once in that window; reads are served until it closes.");
+        var ui = ConsoleUi.ForStdoutDefaultTheme();
+        ui.Line($"Reader window opened: {result.Detail}", Tone.Success);
+        ui.Line("Type the master password once in that window; reads are served until it closes.", Tone.Faint);
         return 0;
     }
-    Console.Error.WriteLine("Could not open a reader window: " + result.Detail);
+    ConsoleUi.ForStderrDefaultTheme().Line("Could not open a reader window: " + result.Detail, Tone.Error);
     return 1;
 }
 
@@ -182,20 +185,20 @@ static async Task<int> RunGenerateAsync(string[] args)
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
     var label = Flag(args, "--label");
     if (string.IsNullOrWhiteSpace(label))
     {
-        Console.Error.WriteLine("usage: keepassxc-mcp generate --label <group/entry> [--length N]");
+        ConsoleUi.ForStderrDefaultTheme().Line("usage: keepassxc-mcp generate --label <group/entry> [--length N]", Tone.Error);
         return 2;
     }
     var length = 32;
     if (Flag(args, "--length") is { } l && !int.TryParse(l, out length))
     {
-        Console.Error.WriteLine("--length expects a number.");
+        ConsoleUi.ForStderrDefaultTheme().Line("--length expects a number.", Tone.Error);
         return 2;
     }
 
@@ -203,14 +206,15 @@ static async Task<int> RunGenerateAsync(string[] args)
     {
         var cli = new KeePassCli(cfg.KeepassxcCliPath);
         var receipt = await SecretOps.GenerateAsync(cfg, paths, cli, new StagingMaintenance(cli, cfg), label, new GenProfile(length));
-        Console.WriteLine($"Generated (inside keepassxc-cli) and staged — value never printed anywhere. Provenance: generated.");
-        Console.WriteLine(SecretOps.ToJson(receipt));
-        Console.WriteLine("Promote to move it into the vault.");
+        var ui = ConsoleUi.ForStdout(cfg);
+        ui.Line("Generated (inside keepassxc-cli) and staged — value never printed anywhere. Provenance: generated.", Tone.Success);
+        ui.Line(SecretOps.ToJson(receipt)); // the machine-readable receipt stays raw JSON, theme or not
+        ui.Line("Promote to move it into the vault.", Tone.Faint);
         return 0;
     }
     catch (Exception ex) when (ex is ArgumentException or KeePassCliException or InvalidOperationException)
     {
-        Console.Error.WriteLine("Error: " + Redact.Apply(ex.Message, cfg.KnownSecrets));
+        ConsoleUi.ForStderr(cfg).Line("Error: " + Redact.Apply(ex.Message, cfg.KnownSecrets), Tone.Error);
         return 1;
     }
 }
@@ -228,25 +232,25 @@ static async Task<int> RunStageVerbAsync(string[] args)
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
     var label = Flag(args, "--label");
     if (string.IsNullOrWhiteSpace(label))
     {
-        Console.Error.WriteLine("usage: echo <value> | keepassxc-mcp stage --label <group/entry> [--notes text]   (value is read from stdin, one line)");
+        ConsoleUi.ForStderrDefaultTheme().Line("usage: echo <value> | keepassxc-mcp stage --label <group/entry> [--notes text]   (value is read from stdin, one line)", Tone.Error);
         return 2;
     }
     if (!Console.IsInputRedirected)
     {
-        Console.Error.WriteLine("stdin is not a pipe — this verb takes the value on stdin so it never enters a conversation.");
+        ConsoleUi.ForStderrDefaultTheme().Line("stdin is not a pipe — this verb takes the value on stdin so it never enters a conversation.", Tone.Error);
         return 2;
     }
     var value = Console.ReadLine();
     if (string.IsNullOrEmpty(value))
     {
-        Console.Error.WriteLine("Empty stdin — nothing staged. Pipe exactly one line with the value.");
+        ConsoleUi.ForStderrDefaultTheme().Line("Empty stdin — nothing staged. Pipe exactly one line with the value.", Tone.Error);
         return 1;
     }
 
@@ -255,14 +259,15 @@ static async Task<int> RunStageVerbAsync(string[] args)
         var cli = new KeePassCli(cfg.KeepassxcCliPath);
         var receipt = await SecretOps.StageValueAsync(cfg, paths, cli, new StagingMaintenance(cli, cfg),
             label, new Secret(value.Trim()), Origin.Piped, Flag(args, "--notes"));
-        Console.WriteLine("Value piped stdin → staging (no agent saw it). Provenance: piped.");
-        Console.WriteLine(SecretOps.ToJson(receipt));
-        Console.WriteLine("Promote to move it into the vault.");
+        var ui = ConsoleUi.ForStdout(cfg);
+        ui.Line("Value piped stdin → staging (no agent saw it). Provenance: piped.", Tone.Success);
+        ui.Line(SecretOps.ToJson(receipt)); // machine-readable receipt, raw
+        ui.Line("Promote to move it into the vault.", Tone.Faint);
         return 0;
     }
     catch (Exception ex) when (ex is ArgumentException or KeePassCliException or InvalidOperationException)
     {
-        Console.Error.WriteLine("Error: " + Redact.Apply(ex.Message, cfg.KnownSecrets));
+        ConsoleUi.ForStderr(cfg).Line("Error: " + Redact.Apply(ex.Message, cfg.KnownSecrets), Tone.Error);
         return 1;
     }
 }
@@ -277,16 +282,32 @@ static int RunAuditVerb()
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
     var store = ProvenanceStore.Load(paths);
-    Console.WriteLine($"tracked secrets: {store.Records.Count} (exposed to a model: {store.Exposed.Count})");
-    foreach (var r in store.Records)
-        Console.WriteLine($"  {r.Path}: {r.Origin} (changed {r.LastChangedUtc:O})" + (r.Origin == Origin.SeenByModel ? "  <-- rotate or dismiss" : ""));
-    if (store.Exposed.Count > 0)
-        Console.WriteLine("Rotate the seen-by-model entries (vault_rotate before promote, or at the service), or delete this file to start fresh — it never contains secret values.");
+    var ui = ConsoleUi.ForStdout(cfg);
+    using (ui.Section("Exposure audit"))
+    {
+        ui.Line($"tracked secrets: {store.Records.Count} (exposed to a model: {store.Exposed.Count})",
+            store.Exposed.Count > 0 ? Tone.Warning : Tone.Success);
+        if (ui.Rich)
+        {
+            // recent-requests style table; seen-by-model rows are the ones to act on.
+            ui.Table(
+                ["entry path", "origin", "changed", "remedy"],
+                store.Records.Select(r => new[] { r.Path, r.Origin.ToString(), r.LastChangedUtc.ToString("O"), r.Origin == Origin.SeenByModel ? "rotate or dismiss" : "" }).ToList(),
+                store.Records.Select(r => r.Origin == Origin.SeenByModel ? Tone.Accent : Tone.Muted).ToList());
+        }
+        else
+        {
+            foreach (var r in store.Records)
+                ui.Line($"  {r.Path}: {r.Origin} (changed {r.LastChangedUtc:O})" + (r.Origin == Origin.SeenByModel ? "  <-- rotate or dismiss" : ""));
+        }
+        if (store.Exposed.Count > 0)
+            ui.Line("Rotate the seen-by-model entries (vault_rotate before promote, or at the service), or delete this file to start fresh — it never contains secret values.", Tone.Faint);
+    }
     return 0;
 }
 
@@ -307,65 +328,88 @@ static int RunStatus()
     }
     catch (ConfigException ex)
     {
-        Console.Error.WriteLine(ex.Message);
+        ConsoleUi.ConfigError(ex.Message);
         return 2;
     }
 
-    Console.WriteLine($"config        : {paths.ConfigFile}");
-    Console.WriteLine($"app version   : {AppInfo.Version}");
-    Console.WriteLine($"main vault    : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (password + keyfile)" : " (password only)"));
-    Console.WriteLine($"staging vault : {cfg.StagingVaultPath}" + (File.Exists(cfg.StagingVaultPath) ? "" : " [not created yet]"));
-    Console.WriteLine($"stagingPassword: [REDACTED — lives in config by design; see SECURITY.md]");
-    Console.WriteLine($"keepassxc-cli : {cfg.KeepassxcCliPath}");
-
+    // Same content in the same order always; on a real terminal it arrives as themed
+    // sections (opencode hairline sections / strata titled cards) over the same rows.
+    var ui = ConsoleUi.ForStdout(cfg);
     var cli = new KeePassCli(cfg.KeepassxcCliPath);
     var staging = new StagingMaintenance(cli, cfg);
-    try
+
+    using (ui.Section("Setup"))
     {
-        var version = cli.VersionAsync().GetAwaiter().GetResult().StdOut.Trim();
-        Console.WriteLine($"cli version   : {version}");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"cli version   : unreachable ({Redact.Apply(ex.Message, cfg.KnownSecrets)})");
+        ui.Kv("config", paths.ConfigFile, 14);
+        ui.Kv("app version", AppInfo.Version, 14);
+        ui.Kv("main vault", cfg.MainVaultPath + (cfg.MainHasKeyfile ? " (password + keyfile)" : " (password only)"), 14);
+        ui.Kv("staging vault", cfg.StagingVaultPath + (File.Exists(cfg.StagingVaultPath) ? "" : " [not created yet]"), 14);
+        ui.Kv("stagingPassword", "[REDACTED — lives in config by design; see SECURITY.md]", 14, Tone.Warning);
+        ui.Kv("keepassxc-cli", cfg.KeepassxcCliPath, 14);
+
+        try
+        {
+            var version = cli.VersionAsync().GetAwaiter().GetResult().StdOut.Trim();
+            ui.Kv("cli version", version, 14);
+        }
+        catch (Exception ex)
+        {
+            ui.Kv("cli version", $"unreachable ({Redact.Apply(ex.Message, cfg.KnownSecrets)})", 14, Tone.Error);
+        }
     }
 
-    if (File.Exists(cfg.StagingVaultPath))
+    using (ui.Section("Staging"))
     {
-        var entries = staging.ListEntryPathsAsync().GetAwaiter().GetResult();
-        Console.WriteLine($"staged entries: {entries.Count}");
-        foreach (var e in entries) Console.WriteLine($"  - {e}");
+        if (File.Exists(cfg.StagingVaultPath))
+        {
+            var entries = staging.ListEntryPathsAsync().GetAwaiter().GetResult();
+            ui.Kv("staged entries", entries.Count.ToString(), 14, entries.Count > 0 ? Tone.Accent : Tone.Muted);
+            foreach (var e in entries) ui.Item(e);
+        }
     }
 
-    var pending = PendingRequest.TryLoad(paths);
-    Console.WriteLine(pending is null
-        ? "pending request : none"
-        : $"pending request : {pending.Entries.Count} entries, {pending.Attachments.Count} attachments, requested {pending.RequestedAtUtc:O}");
+    using (ui.Section("Sessions"))
+    {
+        var pending = PendingRequest.TryLoad(paths);
+        ui.Kv("pending request", pending is null
+                ? "none"
+                : $"{pending.Entries.Count} entries, {pending.Attachments.Count} attachments, requested {pending.RequestedAtUtc:O}", 16,
+            pending is null ? Tone.Muted : Tone.Accent);
 
-    if (ReaderProtocol.TryGetLiveSession(paths, out var reader))
-        Console.WriteLine($"reader session  : OPEN (pid {reader.Pid} since {reader.OpenedAtUtc:O}, idle {reader.IdleMinutes} min) — reads only");
-    else
-        Console.WriteLine("reader session  : none (start with `keepassxc-mcp reader` — a main-vault READ session)");
+        if (ReaderProtocol.TryGetLiveSession(paths, out var reader))
+            ui.Kv("reader session", $"OPEN (pid {reader.Pid} since {reader.OpenedAtUtc:O}, idle {reader.IdleMinutes} min) — reads only", 16, Tone.Success);
+        else
+            ui.Kv("reader session", "none (start with `keepassxc-mcp reader` — a main-vault READ session)", 16, Tone.Muted);
+    }
 
     var provenance = ProvenanceStore.Load(paths);
-    Console.WriteLine($"provenance      : {provenance.Records.Count} tracked, {provenance.Exposed.Count} seen-by-model" +
-        (provenance.Exposed.Count > 0 ? " (rotate or dismiss — see `keepassxc-mcp audit`)" : ""));
+    using (ui.Section("Exposure"))
+    {
+        ui.Kv("provenance", $"{provenance.Records.Count} tracked, {provenance.Exposed.Count} seen-by-model" +
+            (provenance.Exposed.Count > 0 ? " (rotate or dismiss — see `keepassxc-mcp audit`)" : ""), 16,
+            provenance.Exposed.Count > 0 ? Tone.Warning : Tone.Text);
+    }
 
-    var state = PromoterState.Load(paths);
-    Console.WriteLine(state.LastPromotedUtc is { } lp
-        ? $"last promote    : {lp:O} ({state.LastPromotedEntryCount} entries)"
-        : "last promote    : never");
-    Console.WriteLine($"approver window : {(cfg.AllowApproverWindow
-        ? "agent-openable (vault_open_approver / promote-window; disable with \"allowAgentApproverWindow\": false)"
-        : "human-only (allowAgentApproverWindow: false)")}");
+    using (ui.Section("Flow"))
+    {
+        var state = PromoterState.Load(paths);
+        ui.Kv("last promote", state.LastPromotedUtc is { } lp
+                ? $"{lp:O} ({state.LastPromotedEntryCount} entries)"
+                : "never", 16);
+        ui.Kv("approver window", cfg.AllowApproverWindow
+            ? "agent-openable (vault_open_approver / promote-window; disable with \"allowAgentApproverWindow\": false)"
+            : "human-only (allowAgentApproverWindow: false)", 16);
+    }
 
-    Console.WriteLine("main vault password: never in config, never on disk, never in this process — only the interactive `promote` mode reads it from you.");
+    ui.Line("main vault password: never in config, never on disk, never in this process — only the interactive `promote` mode reads it from you.", Tone.Faint);
     return 0;
 }
 
-static void PrintUsage()
+static void PrintUsage(ConsoleUi ui)
 {
-    Console.Error.WriteLine("""
+    // The usage text never changes — on a terminal the mode names and section labels
+    // are painted; piped output is the same block byte for byte.
+    var block = """
         keepassxc-mcp — MCP server + approver/reader CLI for a KeePassXC vault
                       (writes: staging → human approval → merge; reads: human-opened read session)
 
@@ -395,5 +439,23 @@ static void PrintUsage()
 
         config: %APPDATA%\keepassxc-mcp\config.json on Windows, ~/.config/keepassxc-mcp/config.json on
         Linux/macOS, or set KEEPASSXC_MCP_CONFIG. Keep config and the kdbx files out of VCS/sync folders.
-        """);
+        """;
+
+    foreach (var line in block.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+    {
+        if (!ui.Rich)
+        {
+            ui.Line(line);
+            continue;
+        }
+        var cmd = System.Text.RegularExpressions.Regex.Match(line, @"^(?<lead>\s*keepassxc-mcp(?:\s+\S+)?)(?<desc>\s.*)$");
+        if (line.StartsWith("keepassxc-mcp") || line.TrimStart() == "usage:")
+            ui.Line(line, Tone.AccentStructural);
+        else if (cmd.Success)
+            ui.Segments((cmd.Groups["lead"].Value, Tone.Accent), (cmd.Groups["desc"].Value, Tone.Text));
+        else if (line.TrimStart().StartsWith("config:"))
+            ui.Segments(("config:", Tone.AccentStructural), (line.TrimStart()["config:".Length..], Tone.Muted));
+        else
+            ui.Line(line, Tone.Muted); // descriptions, continuation lines, blanks
+    }
 }

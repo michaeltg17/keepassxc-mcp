@@ -28,54 +28,75 @@ public static class Promoter
 
     public static async Task<Exit> RunAsync(VaultConfig cfg, ConfigPaths paths, KeePassCli cli, CancellationToken ct = default)
     {
-        Console.Error.WriteLine("keepassxc-mcp promote — human approval for staged vault changes");
+        // stderr carries the review (stdout stays reserved for the dry-run diff itself);
+        // on a real terminal both arrive themed. Prompts keep going through
+        // ApproverConsole — its masked-echo / redirected-input contract is untouched.
+        var ui = ConsoleUi.ForStderr(cfg);
+        ui.Line("keepassxc-mcp promote — human approval for staged vault changes", Tone.AccentStructural);
         // Identity banner: whoever opened this window (human or vault_open_approver), the
         // human can verify WHICH binary is about to prompt for the master password.
         var self = Environment.ProcessPath ?? "";
-        Console.Error.WriteLine($"this executable : {self} (v{AppInfo.Version})");
+        ui.Line($"this executable : {self} (v{AppInfo.Version})", Tone.Muted);
         if (self.Length > 0 && File.Exists(self))
         {
             var (selfSha, selfSize) = await Hashing.Sha256FileAsync(self, ct);
-            Console.Error.WriteLine($"  its sha256    : {selfSha} ({selfSize} B) — verify before typing any password");
+            ui.Segments(
+                ($"  its sha256    : {selfSha} ({selfSize} B) — ", Tone.Muted),
+                ("verify before typing any password", Tone.Accent));
         }
-        Console.Error.WriteLine();
-        ApproverConsole.WaitEnter("Press Enter in this window to begin the review (nothing has been read or merged): ");
-        Console.Error.WriteLine($"main vault : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (+ keyfile)" : " (password only)"));
-        Console.Error.WriteLine($"staging    : {cfg.StagingVaultPath}");
+        ui.Line();
+        var enterPrompt = "Press Enter in this window to begin the review (nothing has been read or merged): ";
+        ui.PromptBox(enterPrompt, "nothing happens before you press Enter here");
+        ApproverConsole.WaitEnter(ui.Rich ? "" : enterPrompt);
+        ui.Line($"main vault : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (+ keyfile)" : " (password only)"), Tone.Muted);
+        ui.Line($"staging    : {cfg.StagingVaultPath}", Tone.Muted);
 
         var request = PendingRequest.TryLoad(paths);
         if (request is null)
         {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("No pending promotion request. Nothing to do — the agent must call vault_promote first.");
+            ui.Line();
+            ui.Line("No pending promotion request. Nothing to do — the agent must call vault_promote first.", Tone.Error);
             return Exit.Error;
         }
         if (!File.Exists(cfg.MainVaultPath))
         {
-            Console.Error.WriteLine($"Main vault not found at {cfg.MainVaultPath}. Nothing changed.");
+            ui.Line($"Main vault not found at {cfg.MainVaultPath}. Nothing changed.", Tone.Error);
             return Exit.Error;
         }
 
         var state = PromoterState.Load(paths);
         var mainMtime = File.GetLastWriteTimeUtc(cfg.MainVaultPath);
         if (state.LastMainMtimeUtc is { } seen && mainMtime != seen)
-            Console.Error.WriteLine(
+            ui.Line(
                 $"WARNING: main vault file changed since the last promote (mtime {mainMtime:O} vs recorded {seen:O}) — " +
-                "something wrote it outside this flow (GUI edit? sync tool?). Review the dry-run diff carefully.");
+                "something wrote it outside this flow (GUI edit? sync tool?). Review the dry-run diff carefully.", Tone.Warning);
         else if (state.LastMainMtimeUtc is null)
-            Console.Error.WriteLine("note: no previous promote is recorded; the main vault may have been edited outside this flow.");
+            ui.Line("note: no previous promote is recorded; the main vault may have been edited outside this flow.", Tone.Warning);
 
-        Console.Error.WriteLine();
-        Console.Error.WriteLine($"Requested {request.RequestedAtUtc:O} by vault_promote:");
-        foreach (var e in request.Entries)
-            Console.Error.WriteLine($"  entry      {e.Path}");
-        foreach (var a in request.Attachments)
-            Console.Error.WriteLine($"  attachment {a.EntryPath} :: {a.Name} ({a.SizeBytes} B, sha256 {a.Sha256})");
-
-        Console.Error.WriteLine();
-        if (!ApproverConsole.Confirm($"Merge these {request.Entries.Count} entries into {cfg.MainVaultPath}? [y/N] "))
+        ui.Line();
+        ui.Line($"Requested {request.RequestedAtUtc:O} by vault_promote:", Tone.AccentStructural);
+        if (ui.Rich)
         {
-            Console.Error.WriteLine("Denied. Staging and vault untouched; request kept.");
+            // manifest as a table with added/updated markers — what will move, per line.
+            var rows = request.Entries.Select(e => new[] { "+", "entry", e.Path, "" }).ToList();
+            rows.AddRange(request.Attachments.Select(a => new[] { "+", "attachment", a.EntryPath, $"{a.Name} ({a.SizeBytes} B, sha256 {a.Sha256})" }));
+            ui.Table(["", "kind", "target", "attachment"], rows,
+                rows.Select(_ => Tone.Added).ToList());
+        }
+        else
+        {
+            foreach (var e in request.Entries)
+                ui.Line($"  entry      {e.Path}");
+            foreach (var a in request.Attachments)
+                ui.Line($"  attachment {a.EntryPath} :: {a.Name} ({a.SizeBytes} B, sha256 {a.Sha256})");
+        }
+
+        ui.Line();
+        var confirmPrompt = $"Merge these {request.Entries.Count} entries into {cfg.MainVaultPath}? [y/N] ";
+        ui.PromptBox(confirmPrompt, "y merge · n keep staging · ctrl+c abort");
+        if (!ApproverConsole.Confirm(ui.Rich ? "" : confirmPrompt))
+        {
+            ui.Line("Denied. Staging and vault untouched; request kept.", Tone.Warning);
             return Exit.Denied;
         }
 
@@ -88,51 +109,54 @@ public static class Promoter
         CliResult? dry = null;
         for (var attempt = 1; attempt <= MaxPasswordAttempts; attempt++)
         {
-            var entered = ApproverConsole.ReadPassword($"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ");
+            var passwordPrompt = $"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ";
+            ui.PromptBox(passwordPrompt, "typed here only · nothing is written until it passes");
+            var entered = ApproverConsole.ReadPassword(ui.Rich ? "" : passwordPrompt);
             if (entered is null)
             {
-                Console.Error.WriteLine("Input closed at the password prompt — aborting. Nothing changed.");
+                ui.Line("Input closed at the password prompt — aborting. Nothing changed.", Tone.Warning);
                 return Exit.Denied;
             }
             if (entered.Length == 0)
             {
-                Console.Error.WriteLine("Empty password — not tried against the vault.");
+                ui.Line("Empty password — not tried against the vault.", Tone.Warning);
                 continue;
             }
             password = entered;
 
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("merge --dry-run (computed now against the current main vault):");
+            ui.Line();
+            ui.Line("merge --dry-run (computed now against the current main vault):", Tone.Muted);
             dry = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: true, ct: ct);
             if (dry.Success) break;
 
-            Console.Error.WriteLine("Attempt failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets));
+            ui.Line("Attempt failed: " + Redact.Apply(dry.FailureSummary, cfg.KnownSecrets), Tone.Error);
             password = string.Empty;
         }
         if (dry is not { Success: true })
         {
-            Console.Error.WriteLine($"{MaxPasswordAttempts} password attempts failed — nothing was written; staging and request kept. Run `keepassxc-mcp promote` again when ready.");
+            ui.Line($"{MaxPasswordAttempts} password attempts failed — nothing was written; staging and request kept. Run `keepassxc-mcp promote` again when ready.", Tone.Error);
             return Exit.Error;
         }
 
         try
         {
-            Console.WriteLine(string.Join("\n", dry.StdOut
+            // The dry-run diff itself: stdout, raw bytes when piped; +/- diff colors on a terminal.
+            ConsoleUi.ForStdout(cfg).Diff(dry.StdOut
                 .Replace("\r\n", "\n")
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Where(line => !line.TrimStart().StartsWith("Enter password to unlock"))
-                .Select(line => line.TrimEnd())));
+                .Select(line => line.TrimEnd()));
 
             var merge = await cli.MergeAsync(cfg.MainVaultPath, password, cfg.MainKeyfilePath, cfg.StagingVaultPath, cfg.StagingPassword, dryRun: false, ct: ct);
             if (!merge.Success)
             {
-                Console.Error.WriteLine("merge failed: " + Redact.Apply(merge.FailureSummary, cfg.KnownSecrets));
-                Console.Error.WriteLine("The main vault was not written.");
+                ui.Line("merge failed: " + Redact.Apply(merge.FailureSummary, cfg.KnownSecrets), Tone.Error);
+                ui.Line("The main vault was not written.", Tone.Error);
                 return Exit.Error;
             }
 
-            Console.Error.WriteLine();
-            Console.Error.WriteLine("Verifying promoted entries in the main vault...");
+            ui.Line();
+            ui.Line("Verifying promoted entries in the main vault...", Tone.Muted);
             var problems = new List<string>();
             foreach (var entry in request.Entries)
             {
@@ -157,9 +181,9 @@ public static class Promoter
             }
             if (problems.Count > 0)
             {
-                Console.Error.WriteLine("WARNING: merge ran but verification FAILED:");
-                foreach (var p in problems) Console.Error.WriteLine("  - " + p);
-                Console.Error.WriteLine("Staging was NOT flushed and the request is kept — inspect, then re-run promote.");
+                ui.Line("WARNING: merge ran but verification FAILED:", Tone.Warning);
+                foreach (var p in problems) ui.Line("  - " + p, Tone.Error);
+                ui.Line("Staging was NOT flushed and the request is kept — inspect, then re-run promote.", Tone.Warning);
                 return Exit.Error;
             }
 
@@ -170,7 +194,7 @@ public static class Promoter
             state.Save(paths);
             PendingRequest.Clear(paths);
 
-            Console.Error.WriteLine($"OK: {request.Entries.Count} entries promoted to the main vault; staging flushed; pending request cleared.");
+            ui.Line($"OK: {request.Entries.Count} entries promoted to the main vault; staging flushed; pending request cleared.", Tone.Success);
             return Exit.Ok;
         }
         finally

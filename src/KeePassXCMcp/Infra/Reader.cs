@@ -105,36 +105,45 @@ public static class ReaderRunner
     public static async Task<int> RunAsync(VaultConfig cfg, ConfigPaths paths, KeePassCli cli,
         int serverPid = 0, int idleMinutes = ReaderProtocol.DefaultIdleMinutes, CancellationToken ct = default)
     {
-        Console.Error.WriteLine("keepassxc-mcp reader — main-vault read session (reads only; nothing is ever written)");
+        // A reader window is a terminal-only experience; on a pipe this is today's exact text.
+        var ui = ConsoleUi.ForStderr(cfg);
+        // The one thing this window must make unmistakable: it READS, it never writes.
+        ui.Line("keepassxc-mcp reader — main-vault read session (reads only; nothing is ever written)", Tone.AccentStructural);
         var self = Environment.ProcessPath ?? "";
-        Console.Error.WriteLine($"this executable : {self} (v{AppInfo.Version})");
+        ui.Line($"this executable : {self} (v{AppInfo.Version})", Tone.Muted);
         if (self.Length > 0 && File.Exists(self))
         {
             var (selfSha, selfSize) = await Hashing.Sha256FileAsync(self, ct);
-            Console.Error.WriteLine($"  its sha256    : {selfSha} ({selfSize} B) — verify before typing any password");
+            ui.Segments(
+                ($"  its sha256    : {selfSha} ({selfSize} B) — ", Tone.Muted),
+                ("verify before typing any password", Tone.Accent));
         }
-        Console.Error.WriteLine();
-        ApproverConsole.WaitEnter("Press Enter in this window to begin (nothing has been read yet): ");
-        Console.Error.WriteLine($"main vault : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (+ keyfile)" : " (password only)"));
+        ui.Line();
+        var enterPrompt = "Press Enter in this window to begin (nothing has been read yet): ";
+        ui.PromptBox(enterPrompt, "READ session · reads only · no write can happen here");
+        ApproverConsole.WaitEnter(ui.Rich ? "" : enterPrompt);
+        ui.Line($"main vault : {cfg.MainVaultPath}" + (cfg.MainHasKeyfile ? " (+ keyfile)" : " (password only)"), Tone.Muted);
 
         if (!File.Exists(cfg.MainVaultPath))
         {
-            Console.Error.WriteLine($"Main vault not found at {cfg.MainVaultPath}. Nothing to read.");
+            ui.Line($"Main vault not found at {cfg.MainVaultPath}. Nothing to read.", Tone.Error);
             return 1;
         }
 
         var password = string.Empty;
         for (var attempt = 1; attempt <= MaxPasswordAttempts; attempt++)
         {
-            var entered = ApproverConsole.ReadPassword($"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ");
+            var passwordPrompt = $"Master password for the main vault (attempt {attempt}/{MaxPasswordAttempts}, input hidden): ";
+            ui.PromptBox(passwordPrompt, "unlocking READS ONLY · no write can happen in this session");
+            var entered = ApproverConsole.ReadPassword(ui.Rich ? "" : passwordPrompt);
             if (entered is null)
             {
-                Console.Error.WriteLine("Input closed at the password prompt — exiting.");
+                ui.Line("Input closed at the password prompt — exiting.", Tone.Warning);
                 return 1;
             }
             if (entered.Length == 0)
             {
-                Console.Error.WriteLine("Empty password — not tried against the vault.");
+                ui.Line("Empty password — not tried against the vault.", Tone.Warning);
                 continue;
             }
             var probe = await cli.UnlockProbeAsync(cfg.MainVaultPath, entered, cfg.MainKeyfilePath, ct);
@@ -143,11 +152,11 @@ public static class ReaderRunner
                 password = entered;
                 break;
             }
-            Console.Error.WriteLine("Attempt failed: " + Redact.Apply(probe.FailureSummary, cfg.KnownSecrets));
+            ui.Line("Attempt failed: " + Redact.Apply(probe.FailureSummary, cfg.KnownSecrets), Tone.Error);
         }
         if (password.Length == 0)
         {
-            Console.Error.WriteLine($"{MaxPasswordAttempts} password attempts failed — no session opened.");
+            ui.Line($"{MaxPasswordAttempts} password attempts failed — no session opened.", Tone.Error);
             return 1;
         }
 
@@ -160,8 +169,22 @@ public static class ReaderRunner
                 IdleMinutes = idleMinutes,
                 ServerPid = serverPid,
             });
-            Console.Error.WriteLine($"Reader session open (idle timeout {idleMinutes} min" +
-                (serverPid > 0 ? $", closes if server pid {serverPid} exits" : "") + "). Ctrl+C closes it.");
+            var openedUtc = DateTimeOffset.UtcNow;
+            var readsServed = 0;
+            void SessionSummary()
+            {
+                // Honest close summary — content the plain output never carried, so it
+                // is decoration and lives only on the rich path.
+                if (!ui.Rich) return;
+                ui.Line();
+                using var s = ui.Section("Read session summary");
+                s.Kv("duration", $"{(DateTimeOffset.UtcNow - openedUtc):hh\\:mm\\:ss}", 16, Tone.Muted);
+                s.Kv("reads served", readsServed.ToString(), 16, readsServed > 0 ? Tone.Success : Tone.Muted);
+                s.Kv("writes", "0 — this session could not write", 16, Tone.Muted);
+            }
+
+            ui.Line($"Reader session open (idle timeout {idleMinutes} min" +
+                (serverPid > 0 ? $", closes if server pid {serverPid} exits" : "") + "). Ctrl+C closes it.", Tone.Success);
 
             var lastActivity = DateTimeOffset.UtcNow;
             while (!ct.IsCancellationRequested)
@@ -178,23 +201,27 @@ public static class ReaderRunner
                     if (cmd.Op == "close")
                     {
                         ReaderProtocol.WriteAtomic(paths.ReaderResultFile, new ReaderResult { Id = cmd.Id, Ok = true, Output = "closed" });
-                        Console.Error.WriteLine("Closed by request.");
+                        ui.Line("Closed by request.", Tone.Success);
+                        SessionSummary();
                         return 0;
                     }
 
                     var result = await ServiceAsync(cfg, cli, password, cmd, ct);
+                    readsServed++;
                     ReaderProtocol.WriteAtomic(paths.ReaderResultFile, result);
                     continue;
                 }
 
                 if (DateTimeOffset.UtcNow - lastActivity > TimeSpan.FromMinutes(idleMinutes))
                 {
-                    Console.Error.WriteLine($"Idle for {idleMinutes} minutes — closing the reader session.");
+                    ui.Line($"Idle for {idleMinutes} minutes — closing the reader session.", Tone.Warning);
+                    SessionSummary();
                     return 0;
                 }
                 if (serverPid > 0 && !ProcessAlive(serverPid))
                 {
-                    Console.Error.WriteLine($"Server pid {serverPid} is gone — closing the reader session (orphan guard).");
+                    ui.Line($"Server pid {serverPid} is gone — closing the reader session (orphan guard).", Tone.Warning);
+                    SessionSummary();
                     return 0;
                 }
             }
