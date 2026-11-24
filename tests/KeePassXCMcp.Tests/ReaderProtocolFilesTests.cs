@@ -61,10 +61,10 @@ public class ReaderProtocolFilesTests
     [RequiresCliFact]
     public async Task ReaderProtocolFiles_NeverContainSecrets()
     {
+        // given: a main vault with three entries sharing one secret value — one leaked
+        // byte in any protocol file is enough to fail the scan.
         using var h = await VaultHarness.CreateAsync();
         const string secret = "protocol-file-bytes-77";
-
-        // Three entries sharing one value — one byte leaking through any file is enough.
         await h.Cli.EnsureGroupAsync(h.MainPath, VaultHarness.MainPassword, null, "Inbox");
         foreach (var name in new[] { "SecretAlpha", "SecretBeta", "SecretGamma" })
         {
@@ -73,16 +73,16 @@ public class ReaderProtocolFilesTests
             Assert.True(add.Success, add.FailureSummary);
         }
 
-        // Control (raw binary sees the whole flow): search finds every entry by path, and
-        // `show -q` prints the value itself — so the protocol-file absence below is the
-        // protocol's doing, not an empty vault.
+        // and: control — raw keepassxc-cli sees the whole flow (search finds every entry
+        // by path, the attribute read prints the value itself), so the protocol-file
+        // absence below is the protocol's doing, not an empty vault.
         var rawSearch = await h.Cli.SearchAsync(h.MainPath, VaultHarness.MainPassword, null, "Secret");
         Assert.True(rawSearch.Success, rawSearch.FailureSummary);
         rawSearch.StdOut.Should().Contain("Inbox/SecretAlpha").And.Contain("Inbox/SecretBeta").And.Contain("Inbox/SecretGamma");
         var rawValue = await h.Cli.ReadAttributeAsync(h.MainPath, VaultHarness.MainPassword, null, "Inbox/SecretBeta", "Password");
         rawValue.Should().Be(secret);
 
-        // Real reader session, driven over the exact file protocol the tools use.
+        // when: a real reader session runs over the exact file protocol the tools use…
         using var proc = StartReader(h);
         var stdoutTask = proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         proc.StandardInput.WriteLine(VaultHarness.MainPassword);
@@ -93,13 +93,15 @@ public class ReaderProtocolFilesTests
             await Task.Delay(200, TestContext.Current.CancellationToken);
         Assert.True(ReaderProtocol.TryGetLiveSession(h.Paths, out _), "reader session never opened");
 
+        // then: tool-style search answers with paths only, and a scan of every file in
+        // the config dir (session + command files are live here) holds no value bytes
         var search = await ReaderClient.SendAsync(h.Paths, "search", "Secret", TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         Assert.True(search.Ok, search.Error);
         search.Output.Should().Contain("Inbox/SecretAlpha").And.NotContain(secret);
         AssertNoSecretBytes(h.Paths, secret); // mid-session: session + command files on disk
 
-        // One exchange performed RAW, so the result file's own bytes can be inspected while
-        // it is still on disk (ReaderClient deletes it the moment it parses).
+        // when: one exchange is performed RAW so the result file's own bytes can be
+        // inspected while it is still on disk (ReaderClient deletes it the moment it parses)
         ReaderProtocol.WriteAtomic(h.Paths.ReaderCommandFile, new ReaderCommand { Id = "raw-bytes-probe", Op = "get", Arg = "Inbox/SecretBeta" });
         deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
         while (!File.Exists(h.Paths.ReaderResultFile) && DateTime.UtcNow < deadline)
@@ -114,13 +116,14 @@ public class ReaderProtocolFilesTests
         Assert.False(ContainsSequence(onDisk, Encoding.UTF8.GetBytes(secret)), "the on-disk result file held the value"); // …never did.
         File.Delete(h.Paths.ReaderResultFile);
 
+        // when: the session is closed, then: clean exit and — after teardown — no file
+        // in the config dir holds the value in any encoding.
         var close = await ReaderClient.SendAsync(h.Paths, "close", "", TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
         Assert.True(close.Ok, close.Error);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
         proc.ExitCode.Should().Be(0);
         _ = await stdoutTask;
 
-        // After teardown: nothing left behind in any encoding.
         File.Exists(h.Paths.ReaderSessionFile).Should().BeFalse();
         AssertNoSecretBytes(h.Paths, secret);
     }
