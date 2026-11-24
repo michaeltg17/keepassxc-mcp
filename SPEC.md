@@ -94,6 +94,15 @@ repo's differentiator: the staging → human-promote gate for all vault writes.
   (verified: `rm` recycles; merge resolves recycles inconsistently). Recycle-bin
   semantics keep deletes restorable. *(Deferred.)*
 - **F12 Promote** — existing staging → main gate, unchanged.
+- **F12a Staging delete** — `vault_staged_remove(entryPath, confirm)` discards a STAGED
+  entry before promote. Pure label operation (no secret value in the flow):
+  `keepassxc-cli rm -q` on the staging DB (password via stdin) parks it in the staging
+  database's Recycle Bin — CLI 2.8 has no purge, so recycle-only is the only implementable
+  disposition, and recovery via the KeePassXC GUI is safe by design (staging is not a
+  confidentiality boundary). `confirm` must equal `entryPath` exactly. Post-removal
+  verification: rm exit 0 AND gone from the active listing. Sidecars on success: the
+  promotion-manifest record is dropped and the provenance record removed. Never touches
+  the main vault (that is F11, still deferred).
 
 ## E. Enablers (mechanisms, not flows)
 
@@ -127,6 +136,7 @@ repo's differentiator: the staging → human-promote gate for all vault writes.
 |---|---|---|
 | F1 | `vault_generate` | `keepassxc-mcp generate` |
 | F2/F3 | `vault_stage_value` | `keepassxc-mcp stage --label …` (value on stdin) |
+| F12a | `vault_staged_remove` | — (discard a staged entry before promote) |
 | F4 | `vault_search`, `vault_get` | — (needs a reader session: `keepassxc-mcp reader`) |
 | F10 | `vault_rotate` | — (staged change → promote) |
 | E3 | `vault_audit` (+ dismiss verbs) | `keepassxc-mcp audit` |

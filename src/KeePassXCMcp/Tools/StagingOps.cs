@@ -7,6 +7,13 @@ public sealed record AttachmentReceipt(string Name, long Bytes, string Sha256, b
 
 public sealed record StageReceipt(string Entry, bool EntryPreexisted, IReadOnlyList<AttachmentReceipt> Attachments, string StagedAtUtc);
 
+/// <summary>Receipt for a discarded staged entry. The disposition is always "recycled":
+/// keepassxc-cli `rm` parks the entry in the staging database's Recycle Bin and there is
+/// no CLI purge — recovery is the KeePassXC GUI. That is safe by design: staging is not a
+/// confidentiality boundary (SECURITY.md), so a recycled staged entry leaks nothing a
+/// staged entry wasn't already exposed as.</summary>
+public sealed record StagedRemovalReceipt(string Entry, string Disposition, string RecoverVia, string RemovedAtUtc);
+
 public sealed record SnapshotEntry(string Path, string Group, string Title, string Notes, IReadOnlyList<StagedAttachmentInfo> Attachments);
 
 public sealed record StagingSnapshot(DateTimeOffset SnapshotAtUtc, IReadOnlyList<SnapshotEntry> Entries);
@@ -118,6 +125,58 @@ public static class StagingOps
             entries.Add(new SnapshotEntry(entryPath, idx < 0 ? "" : entryPath[..idx], idx < 0 ? entryPath : entryPath[(idx + 1)..], show.Notes, attachments));
         }
         return new StagingSnapshot(DateTimeOffset.UtcNow, entries);
+    }
+
+    /// <summary>Discard one STAGED entry before promote (the F-flow's delete half). Pure
+    /// label operation — no secret value is read anywhere in this flow. `rm -q` parks the
+    /// entry in the staging database's Recycle Bin (the CLI has no purge; recovery is the
+    /// KeePassXC GUI). Verify-after-write mirrors the promote flow: rm exit 0 AND the entry
+    /// gone from the active listing. Sidecars on success only: the manifest record is
+    /// dropped and the provenance record removed — so neither can go stale.</summary>
+    public static async Task<StagedRemovalReceipt> RemoveStagedAsync(
+        VaultConfig cfg, ConfigPaths paths, KeePassCli cli, StagingMaintenance staging,
+        string entryPath, string confirm, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entryPath))
+            throw new ArgumentException("entryPath must not be empty.");
+
+        var staged = await staging.ListEntryPathsAsync(ct);
+        if (!staged.Contains(entryPath))
+            throw new InvalidOperationException(
+                $"'{entryPath}' is not in staging. Nothing changed. Current staged entries:\n{ToJson(staged)}");
+
+        // The only friction knob: the caller must repeat the exact path.
+        if (confirm != entryPath)
+            throw new ArgumentException($"confirmation does not match — pass the exact entry path ('{entryPath}') as confirm to remove it. Nothing changed.");
+
+        var rm = await cli.RemoveEntryAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, entryPath, ct);
+        if (!rm.Success)
+            throw new KeePassCliException("rm failed: " + Redact.Apply(rm.FailureSummary, cfg.KnownSecrets));
+
+        // Post-removal verification: gone from the ACTIVE listing (recycled entries are
+        // invisible to ls by design — StagingMaintenance.ListEntryPathsAsync filters them).
+        var after = await staging.ListEntryPathsAsync(ct);
+        if (after.Contains(entryPath))
+            throw new KeePassCliException($"Removal verification failed: '{entryPath}' is still in the staged listing.");
+
+        DropManifestRecord(paths, entryPath);
+        var provenance = ProvenanceStore.Load(paths);
+        if (provenance.Remove(entryPath)) provenance.Save(paths);
+
+        return new StagedRemovalReceipt(entryPath, "recycled",
+            "KeePassXC GUI → open the staging database and restore it from the Recycle Bin",
+            DateTimeOffset.UtcNow.ToString("O"));
+    }
+
+    /// <summary>Drop an entry (and its attachments) from the pending promotion request, if
+    /// one exists — the same manifest the approver reviews must not advertise a removed entry.</summary>
+    private static void DropManifestRecord(ConfigPaths paths, string entryPath)
+    {
+        var pending = PendingRequest.TryLoad(paths);
+        if (pending is null) return;
+        var dropped = pending.Entries.RemoveAll(e => e.Path == entryPath)
+                    + pending.Attachments.RemoveAll(a => a.EntryPath == entryPath);
+        if (dropped > 0) PendingRequest.Save(paths, pending);
     }
 
     public static string ToJson(object value) => JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });

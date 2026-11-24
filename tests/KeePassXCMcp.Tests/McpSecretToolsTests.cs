@@ -37,7 +37,7 @@ public class McpSecretToolsTests
             "vault_audit", "vault_audit_dismiss",
             "vault_reader_open", "vault_reader_close", "vault_search", "vault_get",
             // pre-existing tools stay:
-            "vault_stage_entry", "vault_list_staged", "vault_promote", "vault_open_approver",
+            "vault_stage_entry", "vault_list_staged", "vault_staged_remove", "vault_promote", "vault_open_approver",
         })
             Assert.Contains(expected, names);
     }
