@@ -2,18 +2,22 @@ name: Beta
 
 # On-demand pre-release builds for verification before a real release:
 # Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
-# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N (N
-# auto-increments and skips numbers burned by DELETED betas — GitHub reserves a
-# deleted release's tag name forever ("immutable release"), while the tag list
-# no longer shows it; the publish step detects the 422 and takes the next
-# number). The Release itself always points at the exact commit, so the tag
-# does not repeat it. It NEVER touches the csproj — beta versions are
+# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N. The number is
+# RESERVED FIRST: beta-meta creates a DRAFT release before anything builds, so
+# every asset is built carrying EXACTLY the tag's version — the two can never
+# disagree. GitHub reserves a deleted release's tag name forever ("immutable
+# release") while /tags hides it, so the draft creation itself is the authority
+# on what's free: on that 422 the next number is taken (bounded retry).
+# The Release always points at the exact commit; the final job only uploads
+# assets and un-drafts. It NEVER touches the csproj — beta versions are
 # command-line build inputs, and <Version> still marks real releases only (AGENTS.md).
+# A FAILED run leaves its DRAFT in place (private, its tag keeps the number out
+# of later runs' way); delete such drafts by hand if desired.
 #
 # Beta-tag deletion policy: never delete a beta tag of the CURRENT or NEXT
-# release — a later run would re-propose its number and hit the reserved-name
-# 422. Only prereleases of versions strictly older than the newest STABLE
-# release are safe to delete.
+# release — deleting burns the name forever and later runs must skip it. Only
+# prereleases of versions strictly older than the newest STABLE release are
+# safe to delete.
 #
 # Stable installs are unaffected: install.ps1/install.sh read releases/latest,
 # which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
@@ -37,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -55,19 +60,50 @@ jobs:
             exit 1
           fi
 
-      - name: Compute beta version
+      - name: Reserve beta number (draft release, before any build)
         id: meta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BASE=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassXCMcp/KeePassXCMcp.csproj)
-          # Starting candidate only: tag numbers deleted with their (immutable)
-          # release are invisible here but stay reserved — beta-publish skips
-          # them on the 422 and the summary there names the tag ACTUALLY made.
+          cat > NOTES.md <<EOF
+          **Pre-release for verification — not a release.** Built from \`${GITHUB_REF_NAME}@${GITHUB_SHA}\`.
+          Self-contained single-file builds; the external **keepassxc-cli** (KeePassXC >= 2.7.x) is still required.
+
+            KEEPASSXC_MCP_PRERELEASE=1   # then run install.ps1 / install.sh as usual
+
+          The default install commands (without that opt-in) keep installing the latest STABLE release.
+          EOF
+          # Starting candidate from live tags (a draft's tag is listed too, so a
+          # prior failed run's number is already out of the way). Numbers burned
+          # by DELETED releases are invisible here but stay reserved — the draft
+          # creation is the authority: on that 422 take the next number.
           N=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate --jq '.[].name' \
               | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
           N=$(( ${N:-0} + 1 ))
-          echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
+          ERR=$(mktemp)
+          for _ in $(seq 1 15); do
+            TAG="v${BASE}-beta.${N}"
+            if gh release create "$TAG" \
+              --draft --prerelease \
+              --target "${GITHUB_SHA}" \
+              --title "$TAG" \
+              --notes-file NOTES.md 2>"$ERR"; then
+              echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
+              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "reserved draft **${TAG}** at ${GITHUB_SHA} — every asset builds as ${BASE}-beta.${N}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if grep -qi "immutable release" "$ERR"; then
+              echo "tag ${TAG} is reserved by a deleted release — taking the next number" >&2
+              N=$((N + 1))
+              continue
+            fi
+            cat "$ERR" >&2
+            exit 1
+          done
+          echo "::error::no free beta tag after 15 attempts starting at ${BASE}-beta.${N}" >&2
+          exit 1
 
   beta-assets:
     needs: beta-meta
@@ -80,7 +116,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # The shared build recipe (same action the release job uses) — the version
-      # override is the only difference.
+      # override is the only difference. It is EXACTLY the reserved tag's version.
       - uses: ./.github/actions/build-asset
         with:
           rid: ${{ matrix.rid }}
@@ -109,48 +145,13 @@ jobs:
           sha256sum keepassxc-mcp-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create prerelease
+      - name: Publish the reserved prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.beta-meta.outputs.version }}
+          TAG: ${{ needs.beta-meta.outputs.tag }}
         run: |
-          cat > NOTES.md <<EOF
-          **Pre-release for verification — not a release.** Built from \`${GITHUB_REF_NAME}@${GITHUB_SHA}\`.
-          Self-contained single-file builds; the external **keepassxc-cli** (KeePassXC >= 2.7.x) is still required.
-
-            KEEPASSXC_MCP_PRERELEASE=1   # then run install.ps1 / install.sh as usual
-
-          The default install commands (without that opt-in) keep installing the latest STABLE release.
-          EOF
-          # A deleted release keeps its tag name reserved forever (immutable
-          # releases) while /tags stops listing it, so the computed candidate may
-          # already be burned. Self-heal: on that 422 take the next number; any
-          # other error fails as before. (Verified live: run 45401543346 skipped
-          # burned .1/.2 and published .3.) The retry changes only the TAG — the
-          # version stamped into the built assets stays the candidate beta-meta
-          # computed, which is fine: beta builds are verification artifacts,
-          # never installed by default.
-          BASE="${VERSION%-beta.*}"
-          N="${VERSION##*-beta.}"
-          ERR=$(mktemp)
-          for _ in $(seq 1 15); do
-            TAG="v${BASE}-beta.${N}"
-            if gh release create "$TAG" \
-              dist/* \
-              --prerelease \
-              --target "${GITHUB_SHA}" \
-              --title "$TAG" \
-              --notes-file NOTES.md 2>"$ERR"; then
-              echo "beta **${TAG}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            if grep -qi "immutable release" "$ERR"; then
-              echo "tag ${TAG} is reserved by a deleted release — taking the next number" >&2
-              N=$((N + 1))
-              continue
-            fi
-            cat "$ERR" >&2
-            exit 1
-          done
-          echo "::error::no free beta tag after 15 attempts starting at ${VERSION}" >&2
-          exit 1
+          # The tag was reserved (as a draft) by beta-meta, and the assets were
+          # built carrying exactly this version — only upload and un-draft here.
+          gh release upload "$TAG" dist/*
+          gh release edit "$TAG" --draft=false
+          echo "beta **${TAG}** from ${GITHUB_SHA} published" >> "$GITHUB_STEP_SUMMARY"
