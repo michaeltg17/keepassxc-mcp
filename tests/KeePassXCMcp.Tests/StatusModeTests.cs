@@ -19,16 +19,18 @@ public class StatusModeTests
         };
         psi.ArgumentList.Add("--version");
 
+        // when: the executable is asked for its version, then: exit 0 and a semver banner
         using var proc = Process.Start(psi)!;
         var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, proc.ExitCode);
-        Assert.Matches(@"^keepassxc-mcp \d+\.\d+\.\d+", stdout.Trim());
+        proc.ExitCode.Should().Be(0);
+        stdout.Trim().Should().MatchRegex(@"^keepassxc-mcp \d+\.\d+\.\d+");
     }
     [RequiresCliFact]
     public async Task Status_PrintsRedactedConfigAndStagingState()
     {
+        // given: one staged entry, one recorded promotion request, and a real config
         using var harness = await VaultHarness.CreateAsync();
         await harness.StageAsync("Inbox", "StatusEntry", "body");
         await harness.RecordPromotionRequestAsync();
@@ -44,19 +46,19 @@ public class StatusModeTests
         psi.ArgumentList.Add("status");
         psi.Environment["KEEPASSXC_MCP_CONFIG"] = harness.Paths.ConfigFile;
 
+        // when: `status` runs, then: it shows the human state — version, staged content,
+        // pending request — with the staging password REDACTED, never printed…
         using var proc = Process.Start(psi)!;
         var stdout = await proc.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, proc.ExitCode);
-        Assert.Contains("app version   : " + AppInfo.Version, stdout);
-        Assert.Contains($"staged entries: 1", stdout);
-        Assert.Contains("StatusEntry", stdout);
-        Assert.Contains("pending request : 1 entries", stdout);
-        Assert.Contains("[REDACTED", stdout);
-        // stagingPassword value must NEVER appear in status output:
-        Assert.DoesNotContain(VaultHarness.StagingPassword, stdout);
-        // and the main vault password is never part of config at all:
-        Assert.DoesNotContain("mainVaultPassword", File.ReadAllText(harness.Paths.ConfigFile));
+        proc.ExitCode.Should().Be(0);
+        stdout.Should().Contain("app version   : " + AppInfo.Version)
+            .And.Contain("staged entries: 1").And.Contain("StatusEntry")
+            .And.Contain("pending request : 1 entries").And.Contain("[REDACTED");
+        // …and the one password that must never exist anywhere in this flow: the main
+        // vault password is not part of config at all, so status cannot even see it.
+        stdout.Should().NotContain(VaultHarness.StagingPassword);
+        File.ReadAllText(harness.Paths.ConfigFile).Should().NotContain("mainVaultPassword");
     }
 }

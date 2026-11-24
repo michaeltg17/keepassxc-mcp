@@ -2,10 +2,26 @@ name: Beta
 
 # On-demand pre-release builds for verification before a real release:
 # Actions -> Beta -> Run workflow (or: gh workflow run beta.yml --ref dev).
-# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N (N
-# auto-increments; the Release itself always points at the exact commit, so the
-# tag does not repeat it). It NEVER touches the csproj — beta versions are
-# command-line build inputs, and <Version> still marks real releases only (AGENTS.md).
+# Publishes a GitHub PRERELEASE tagged v<csproj-version>-beta.N. The number is
+# RESERVED FIRST: beta-meta creates the bare GIT TAG v…-beta.N before anything
+# builds, so every asset is built carrying EXACTLY the tag's version — the two
+# can never disagree. Creating the ref is the authoritative free-name probe:
+# GitHub reserves deleted releases' tag names forever ("immutable release")
+# and enforces that as a pre-receive rule, so ref creation fails on a burned
+# name (invisible in /tags) and the next number is taken (bounded retry).
+# Drafts can't reserve anything — GitHub defers tag creation and name
+# validation to publish. The release is then created ON that tag WITH its
+# assets in one call (immutable releases never accept asset uploads after
+# creation). It NEVER touches the csproj — beta versions are command-line
+# build inputs, and <Version> still marks real releases only (AGENTS.md).
+# A FAILED run leaves its reserved tag (listed in /tags, so later runs'
+# numbers naturally step past it); deleting such a tag burns the name, which
+# the reserve loop handles.
+#
+# Beta-tag deletion policy: never delete a beta tag of the CURRENT or NEXT
+# release — deleting burns the name forever and later runs must skip it. Only
+# prereleases of versions strictly older than the newest STABLE release are
+# safe to delete.
 #
 # Stable installs are unaffected: install.ps1/install.sh read releases/latest,
 # which excludes prereleases. Opt in with KEEPASSXC_MCP_PRERELEASE=1.
@@ -27,6 +43,8 @@ jobs:
   beta-meta:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # reserves the tag: creates the draft release here now
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
@@ -48,18 +66,40 @@ jobs:
             exit 1
           fi
 
-      - name: Compute beta version
+      - name: Reserve beta number (create the git tag before any build)
         id: meta
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BASE=$(grep -oPm1 '(?<=<Version>)[^<]+' src/KeePassXCMcp/KeePassXCMcp.csproj)
+          # Starting candidate from live tags (a prior run's reserved tag IS
+          # listed, so a failed run's number is already out of the way). Names
+          # burned by DELETED releases are invisible here but stay reserved —
+          # and that reservation is enforced as a pre-receive rule, so creating
+          # the ref is the authoritative probe: it fails on burned names.
           N=$(gh api "repos/${GITHUB_REPOSITORY}/tags" --paginate --jq '.[].name' \
               | sed -n "s/^v${BASE}-beta\.\([0-9]\+\).*/\1/p" | sort -n | tail -1)
           N=$(( ${N:-0} + 1 ))
-          echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
-          echo "beta **v${BASE}-beta.${N}** from ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          ERR=$(mktemp)
+          for _ in $(seq 1 15); do
+            TAG="v${BASE}-beta.${N}"
+            if gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${GITHUB_SHA}" >/dev/null 2>"$ERR"; then
+              echo "version=${BASE}-beta.${N}" >> "$GITHUB_OUTPUT"
+              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "reserved **${TAG}** (git tag at ${GITHUB_SHA}) — every asset builds as ${BASE}-beta.${N}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if grep -qiE "immutable|already exists|restricted|reference cannot be created|reference update failed" "$ERR"; then
+              echo "tag ${TAG} is taken (burned or held) — taking the next number" >&2
+              N=$((N + 1))
+              continue
+            fi
+            cat "$ERR" >&2
+            exit 1
+          done
+          echo "::error::no free beta tag after 15 attempts starting at ${BASE}-beta.${N}" >&2
+          exit 1
 
   beta-assets:
     needs: beta-meta
@@ -71,38 +111,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v6
+      # The shared build recipe (same action the release job uses) — the version
+      # override is the only difference. It is EXACTLY the reserved tag's version.
+      - uses: ./.github/actions/build-asset
         with:
-          dotnet-version: |
-            11.0.x
-
-      # Same build recipe as the release job — beta must be the real artifact.
-      # The version override is the ONLY difference.
-      - name: Publish (${{ matrix.rid }})
-        run: |
-          dotnet publish src/KeePassXCMcp/KeePassXCMcp.csproj \
-            -c Release -r ${{ matrix.rid }} --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:IncludeNativeLibrariesForSelfExtract=true \
-            -p:EnableCompressionInSingleFile=true \
-            -p:DebugType=none -p:DebugSymbols=false \
-            -p:Version=${{ needs.beta-meta.outputs.version }} \
-            -o out/${{ matrix.rid }}
-
-      - name: Archive (${{ matrix.rid }})
-        run: |
-          V=${{ needs.beta-meta.outputs.version }}
-          if [[ "${{ matrix.rid }}" == win-* ]]; then
-            (cd out/${{ matrix.rid }} && 7z a -tzip ../../keepassxc-mcp-$V-${{ matrix.rid }}.zip keepassxc-mcp.exe)
-          else
-            tar -czf keepassxc-mcp-$V-${{ matrix.rid }}.tar.gz -C out/${{ matrix.rid }} keepassxc-mcp
-          fi
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: beta-asset-${{ matrix.rid }}
-          path: keepassxc-mcp-*
-          if-no-files-found: error
+          rid: ${{ matrix.rid }}
+          version: ${{ needs.beta-meta.outputs.version }}
+          artifact-prefix: beta-asset
 
   beta-publish:
     needs: [beta-meta, beta-assets]
@@ -126,11 +141,10 @@ jobs:
           sha256sum keepassxc-mcp-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Create prerelease
+      - name: Publish the reserved prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.beta-meta.outputs.tag }}
-          VERSION: ${{ needs.beta-meta.outputs.version }}
         run: |
           cat > NOTES.md <<EOF
           **Pre-release for verification — not a release.** Built from \`${GITHUB_REF_NAME}@${GITHUB_SHA}\`.
@@ -140,9 +154,14 @@ jobs:
 
           The default install commands (without that opt-in) keep installing the latest STABLE release.
           EOF
+          # beta-meta already created this exact tag, and the assets were built
+          # carrying exactly this version. GitHub uses the existing ref (the
+          # --target is then ignored) and the assets go on IN THIS CALL — an
+          # immutable release never accepts asset uploads afterwards.
           gh release create "$TAG" \
             dist/* \
             --prerelease \
             --target "${GITHUB_SHA}" \
             --title "$TAG" \
             --notes-file NOTES.md
+          echo "beta **${TAG}** from ${GITHUB_SHA} published" >> "$GITHUB_STEP_SUMMARY"

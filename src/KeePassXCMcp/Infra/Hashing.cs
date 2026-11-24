@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 
 namespace KeePassXCMcp.Infra;
 
@@ -20,6 +21,6 @@ public static class Hashing
     public static string Sha256Hex(string text)
     {
         using var sha = SHA256.Create();
-        return Convert.ToHexStringLower(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(text)));
+        return Convert.ToHexStringLower(sha.ComputeHash(Encoding.UTF8.GetBytes(text)));
     }
 }

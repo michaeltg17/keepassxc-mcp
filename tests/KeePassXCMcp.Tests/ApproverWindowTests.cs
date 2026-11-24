@@ -33,16 +33,20 @@ public class ApproverWindowTests
             psi.ArgumentList.Add("promote");
             psi.Environment["KEEPASSXC_MCP_CONFIG"] = configFile;
 
+            // given: a config pointing at unused vaults — there will be NO pending
+            // request, so promote must refuse…
             using var proc = Process.Start(psi)!;
             proc.StandardInput.Close();
             var stderr = await proc.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
             await proc.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-            // no pending request → refuses, but the identity banner always prints first
-            Assert.Equal((int)Promoter.Exit.Error, proc.ExitCode);
-            Assert.Contains(VaultHarness.ServerExePath, stderr);
-            Assert.Contains($"(v{AppInfo.Version})", stderr);
-            Assert.Matches(@"its sha256\s*: [0-9a-f]{64}", stderr);
+            // …but the identity banner prints first, whatever happens: path, version and
+            // sha256 of the exact binary that would ask for the master password — so a
+            // human at the window always knows what they are authenticating.
+            proc.ExitCode.Should().Be((int)Promoter.Exit.Error);
+            stderr.Should().Contain(VaultHarness.ServerExePath)
+                .And.Contain($"(v{AppInfo.Version})")
+                .And.MatchRegex(@"its sha256\s*: [0-9a-f]{64}");
         }
         finally { Directory.Delete(dir, recursive: true); }
     }

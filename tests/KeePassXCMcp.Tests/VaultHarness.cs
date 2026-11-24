@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using KeePassXCMcp.Infra;
+using KeePassXCMcp.Tools;
 
 namespace KeePassXCMcp.Tests;
 
@@ -75,14 +76,14 @@ public sealed class VaultHarness : IDisposable
 
     public async Task<(string EntryPath, List<(string Name, string Sha256, long Size)> Attachments)> StageAsync(string group, string title, string notes, params string[] attachmentSourcePaths)
     {
-        var receipt = await KeePassXCMcp.Tools.StagingOps.StageEntryAsync(Config, Cli, Staging, group, title, notes, attachmentSourcePaths);
+        var receipt = await StagingOps.StageEntryAsync(Config, Cli, Staging, group, title, notes, attachmentSourcePaths);
         return (receipt.Entry, receipt.Attachments.Select(a => (a.Name, a.Sha256, a.Bytes)).ToList());
     }
 
     /// <summary>Records a PendingRequest from current staging (what vault_promote does).</summary>
     public async Task<PendingRequest> RecordPromotionRequestAsync()
     {
-        var snapshot = await KeePassXCMcp.Tools.StagingOps.SnapshotStagingAsync(Config, Cli, Staging);
+        var snapshot = await StagingOps.SnapshotStagingAsync(Config, Cli, Staging);
         var request = new PendingRequest
         {
             RequestedAtUtc = snapshot.SnapshotAtUtc,

@@ -7,7 +7,8 @@ real terminal window. This drill covers exactly that residue. Run it:
 - after each release (PR merged, release published) and after updating the installed binary;
 - whenever `promote`, the merge/verification flow, or the approver-window launcher changes;
 - whenever the `reader` mode, its file protocol, the provenance sidecar, or the
-  generate/stage/rotate flows change (Part B below).
+  generate/stage/rotate flows change (Part B below);
+- whenever the console rendering or themes change (Part C below).
 
 Rules that hold throughout: the main vault password is typed only by the human, only into
 the window — never shown here, never in any tool the agent uses. The window banner is the
@@ -109,6 +110,38 @@ Part B checklist:
 - [ ] reader closes by request, by Ctrl+C, and disappears from `status`
 - [ ] clean up: remove the three `ManualTest-…-gen/piped/…` entries from staging before
       promoting anything for real (or promote one on purpose and delete it in the GUI)
+
+## Part C — the console-theme drill (issue #24)
+
+Run this when the console rendering changed. The automated suite proves the CONTENT of the
+rich path; this part is the part no test can do — how a real terminal LOOKS, and that a
+pipe still gets today's exact plain bytes.
+
+1. Plain path first (the machine contract): `keepassxc-mcp status | Out-File check.txt`,
+   and with `$env:NO_COLOR="1"` / `$env:CI="1"` set. All of these must show the same
+   aligned plain text as before — no ANSI junk, no boxes, no glyphs. (MCP stdio mode is
+   untouched either way: its stdout is JSON-RPC.)
+2. Real terminal, DEFAULT theme: run `keepassxc-mcp status`, `audit`, `help` directly (no
+   pipe) in Windows Terminal / conhost. Expect the `opencode` look: purple section titles
+   with hairline rules, dim keys, values readable, `[REDACTED` amber, warnings amber,
+   errors red. Nothing may look garbled (box glyphs = the terminal is fine).
+3. Strata: add `"consoleTheme": "strata"` to config.json → the same content arrives as
+   titled green cards. Remove the key → default again. Set a nonsense value like
+   `"consoleTheme": "wat"` → default theme, no error, no complaint.
+4. The decision windows, in a real window: `keepassxc-mcp promote-window` (with a staged
+   request) and `keepassxc-mcp reader-window`. Prompts must sit in visible boxes with key
+   hints (`y merge · n keep staging · ctrl+c abort`), the identity banner must emphasize
+   `verify before typing any password`, and the dry-run diff must read as `+`/`-` lines.
+   The reader window's close must show the honest session summary (duration, reads served,
+   writes: 0). Type `y` + a password exactly as in Part A — the boxes must NOT change how
+   input is read (masked password, Ctrl+C still aborts cleanly).
+
+Part C checklist:
+
+- [ ] piped / NO_COLOR / CI output is byte-identical plain text (no escapes at all)
+- [ ] both themes render their own layout in a real terminal; unknown name = default, silently
+- [ ] prompts, diff colors and hints are decoration: the flow works exactly as in Part A/B
+- [ ] no secret value appears in any themed surface
 
 ## Leave-behinds
 

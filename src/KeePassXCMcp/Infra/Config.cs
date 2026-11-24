@@ -11,7 +11,11 @@ public sealed record VaultConfig(
     string StagingVaultPath,
     string StagingPassword,
     string KeepassxcCliPath,
-    bool? AllowAgentApproverWindow = null)
+    bool? AllowAgentApproverWindow = null,
+    // ConsoleTheme: "opencode" (default) or "strata" — resolved by name (Themes.Resolve);
+    // unknown/absent falls back to the default. Two built-in themes only, never a custom
+    // palette; piped/redirected output always stays plain text regardless.
+    string? ConsoleTheme = null)
 {
     /// <summary>Main vault may be password-only (null keyfile) or password+keyfile.</summary>
     public bool MainHasKeyfile => !string.IsNullOrWhiteSpace(MainKeyfilePath);

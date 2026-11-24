@@ -43,8 +43,7 @@ if ($prerelease) {
 $tag = if ($latest) { $latest.tag_name } else { $null }
 if (-not $tag) { Write-Error "Could not determine the latest release tag (prerelease opt-in: $prerelease)."; exit 1 }
 
-# Some prerelease tags carry +<sha> build metadata; assets are named without it.
-$version = ($tag.TrimStart('v') -split '\+')[0]
+$version = $tag.TrimStart('v')
 $asset = "keepassxc-mcp-$version-$rid.zip"
 $base = "https://github.com/$repo/releases/download/$tag"
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "keepassxc-mcp-install-$([guid]::NewGuid())")

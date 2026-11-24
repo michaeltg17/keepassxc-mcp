@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>keepassxc-mcp</AssemblyName>
     <RootNamespace>KeePassXCMcp</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Description>MCP server + CLI giving an AI agent a request/approve/merge path into a KeePassXC vault.</Description>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
@@ -15,6 +15,7 @@
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="2.4.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
   </ItemGroup>
 
 </Project>

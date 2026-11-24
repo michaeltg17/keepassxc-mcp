@@ -8,6 +8,8 @@ It uses keepassxc-cli — the official KeePassXC binary — for every kdbx opera
 
 The master password is only ever typed by a human in their own terminal, never seen by the agent.
 
+Human-facing console output has two built-in themes on a real terminal (`consoleTheme` in config: `opencode` default, `strata`); piped output stays plain text.
+
 See the [wiki](https://github.com/michaeltg17/keepassxc-mcp/wiki) for more info.
 
 ---
