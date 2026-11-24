@@ -254,7 +254,7 @@ static async Task<int> RunStageVerbAsync(string[] args)
     {
         var cli = new KeePassCli(cfg.KeepassxcCliPath);
         var receipt = await SecretOps.StageValueAsync(cfg, paths, cli, new StagingMaintenance(cli, cfg),
-            label, value.Trim(), Origin.Piped, Flag(args, "--notes"));
+            label, new Secret(value.Trim()), Origin.Piped, Flag(args, "--notes"));
         Console.WriteLine("Value piped stdin → staging (no agent saw it). Provenance: piped.");
         Console.WriteLine(SecretOps.ToJson(receipt));
         Console.WriteLine("Promote to move it into the vault.");

@@ -14,14 +14,6 @@ public sealed record SecretReceipt(string Entry, string Uuid, string Origin, int
 /// sidecar. They are never returned in any receipt.</summary>
 public static class SecretOps
 {
-    public static void ValidateValue(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-            throw new ArgumentException("the secret value must not be empty.");
-        if (value.Contains('\r') || value.Contains('\n'))
-            throw new ArgumentException("the secret value must be a single line (no newlines) — it travels via stdin line protocol.");
-    }
-
     public static (string? Group, string Title) SplitLabel(string label)
     {
         var idx = label.LastIndexOf('/');
@@ -61,11 +53,10 @@ public static class SecretOps
     /// piped via CLI stdin, or seen-by-model via the MCP tool).</summary>
     public static async Task<SecretReceipt> StageValueAsync(
         VaultConfig cfg, ConfigPaths paths, KeePassCli cli, StagingMaintenance staging,
-        string label, string value, string origin,
+        string label, Secret value, string origin,
         string? notes = null, string? username = null, string? url = null,
         CancellationToken ct = default)
     {
-        ValidateValue(value);
         if (origin is not (Origin.Piped or Origin.SeenByModel))
             throw new ArgumentException($"origin must be '{Origin.Piped}' or '{Origin.SeenByModel}'.");
 
@@ -130,8 +121,8 @@ public static class SecretOps
     private static async Task<(string Uuid, string Fingerprint)> FingerprintAsync(VaultConfig cfg, KeePassCli cli, string entryPath, CancellationToken ct)
     {
         var show = ShowParser.Parse((await cli.ShowAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, entryPath, showAttachments: false, ct: ct)).StdOut);
-        var value = await cli.ReadAttributeAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, entryPath, "Password", ct);
-        return (show.Uuid, Hashing.Sha256Hex(value));
+        var secret = new Secret(await cli.ReadAttributeAsync(cfg.StagingVaultPath, cfg.StagingPassword, null, entryPath, "Password", ct));
+        return (show.Uuid, secret.FingerprintSha256);
     }
 
     private static void RecordProvenance(ConfigPaths paths, string entryPath, string uuid, string origin, string fingerprint, bool rotated)

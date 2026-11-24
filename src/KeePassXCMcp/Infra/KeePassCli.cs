@@ -202,23 +202,23 @@ public sealed class KeePassCli(string exePath)
     }
 
     /// <summary>`add -p` — entry password supplied on stdin (db pw, entry pw, repeat).</summary>
-    public Task<CliResult> AddWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, string entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
+    public Task<CliResult> AddWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, Secret entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
     {
         var args = new List<string> { "add", "-q", "-p" };
         if (!string.IsNullOrEmpty(notes)) { args.Add("--notes"); args.Add(notes); }
         if (!string.IsNullOrEmpty(username)) { args.Add("-u"); args.Add(username); }
         if (!string.IsNullOrEmpty(url)) { args.Add("--url"); args.Add(url); }
-        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue, entryValue], ct);
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue.Reveal(), entryValue.Reveal()], ct);
     }
 
     /// <summary>`edit -p` — replaces the entry password from stdin (db pw, new entry pw, repeat).</summary>
-    public Task<CliResult> EditWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, string entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
+    public Task<CliResult> EditWithValueAsync(string dbPath, string password, string? keyfilePath, string entryPath, Secret entryValue, string? notes, string? username, string? url, CancellationToken ct = default)
     {
         var args = new List<string> { "edit", "-q", "-p" };
         if (notes is not null) { args.Add("--notes"); args.Add(notes); }
         if (!string.IsNullOrEmpty(username)) { args.Add("-u"); args.Add(username); }
         if (!string.IsNullOrEmpty(url)) { args.Add("--url"); args.Add(url); }
-        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue, entryValue], ct);
+        return RunAsync(WithKeyfile(args, keyfilePath).Concat([dbPath, entryPath]).ToList(), [password, entryValue.Reveal(), entryValue.Reveal()], ct);
     }
 
     /// <summary>`edit -g` — regenerates the entry password inside keepassxc-cli (rotation).</summary>

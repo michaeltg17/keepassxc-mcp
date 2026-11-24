@@ -32,7 +32,7 @@ public class ReaderTests
         const string secret = "reader-entry-secret-42";
         await h.Cli.EnsureGroupAsync(h.MainPath, VaultHarness.MainPassword, null, "Inbox");
         var add = await h.Cli.AddWithValueAsync(h.MainPath, VaultHarness.MainPassword, null,
-            "Inbox/ReaderEntry", secret, "reader notes", "svc-user", "https://example.test");
+            "Inbox/ReaderEntry", new Secret(secret), "reader notes", "svc-user", "https://example.test");
         Assert.True(add.Success, add.FailureSummary);
 
         using var proc = StartReader(h);

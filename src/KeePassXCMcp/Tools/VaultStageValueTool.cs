@@ -26,7 +26,7 @@ public static class VaultStageValueTool
         {
             var receipt = await SecretOps.StageValueAsync(
                 VaultContext.Config, VaultContext.Paths, VaultContext.Cli, VaultContext.Staging,
-                label, value, Origin.SeenByModel, notes, username, url);
+                label, new Secret(value), Origin.SeenByModel, notes, username, url);
             return "Staged into sandbox (main vault untouched). TAGGED seen-by-model: the value was visible " +
                    "in this conversation, so it is on the vault_audit rotation list — recommend rotating it at the " +
                    "service once promoted.\n" + StagingOps.ToJson(receipt);
